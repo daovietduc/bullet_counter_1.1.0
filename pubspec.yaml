@@ -1,0 +1,66 @@
+name: bullet_counter
+description: "A new Flutter project."
+publish_to: 'none' # Ngăn chặn việc xuất bản riêng
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.10.1
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  cupertino_icons: ^1.0.8            # Icon phong cách iOS mặc định
+  camera: ^0.11.3                    # Điều khiển camera, lấy preview và chụp ảnh
+  provider: ^6.0.5                   # Quản lý trạng thái (State Management) toàn cục
+  path_provider: ^2.1.5              # Truy cập thư mục hệ thống (Temp, Documents) để lưu tệp
+  image_picker: ^1.1.2               # Giao diện chọn ảnh/video từ thư viện hoặc chụp từ camera
+  image_gallery_saver_plus: ^4.0.1   # Lưu file ảnh/video trực tiếp vào Album (Gallery) điện thoại
+  permission_handler: ^11.3.1        # Yêu cầu và kiểm tra quyền (Camera, Storage, Photos)
+  tflite_flutter: ^0.12.1            # Engine chạy mô hình AI (TensorFlow Lite) ngay trên thiết bị
+  image: ^4.1.3                      # Xử lý pixel ảnh (Resize, Crop, xoay ảnh) ở dạng byte
+  screenshot: ^3.0.0                 # Chụp ảnh màn hình một Widget cụ thể (kèm Bounding Box)
+  shared_preferences: ^2.2.2         # Lưu trữ dữ liệu nhỏ (Cấu hình, Mode đếm) xuống bộ nhớ máy
+  logging: ^1.2.0                    # Ghi log hệ thống để theo dõi và debug lỗi chuyên nghiệp
+  flutter_spinkit: ^5.2.2            # Bộ sưu tập các hiệu ứng loading
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^6.0.0
+
+flutter:
+
+  assets:
+    # Khai báo tường minh file model và labels
+    - assets/yolo11m_obb_bullet_couter_preview_float32.tflite
+    - assets/yolo11m_obb_bullet_couter_preview_float16.tflite
+    - assets/yolo11s-obb_float32.tflite
+    - assets/yolo11s-obb_float16.tflite
+    - assets/labels.txt
+    - assets/fonts/
+    - assets/images/
+
+  uses-material-design: true
+  # Thêm fonts, assets, và các cài đặt khác cho Flutter tại đây
+  fonts:
+    - family: Lexend
+      fonts:
+        - asset: assets/fonts/Lexend-Bold.ttf
+          weight: 700
+
+    - family: Montserrat
+      fonts:
+        - asset: assets/fonts/Montserrat-Bold.ttf
+          weight: 700
+
+    - family: SFPro
+      fonts:
+        - asset: assets/fonts/SF-Pro-Display-Bold.otf
+          weight: 700
+
+    - family: UTM_Helvet
+      fonts:
+        - asset: assets/fonts/UTM_HelvetIns.ttf
+          weight: 700
