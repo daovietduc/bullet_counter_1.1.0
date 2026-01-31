@@ -3,85 +3,93 @@ import 'package:camera/camera.dart';
 import '../screens/counting_screen.dart';
 import 'package:logging/logging.dart';
 
-/// Service quản lý Camera.
-/// Tách biệt logic điều khiển camera khỏi UI, sử dụng ChangeNotifier để cập nhật trạng thái.
+/// [CameraService] quản lý toàn bộ vòng đời và hoạt động của Camera.
+/// Sử dụng [ChangeNotifier] để thông báo cho UI cập nhật khi trạng thái camera thay đổi
+/// (ví dụ: khi camera khởi tạo xong hoặc khi đổi chế độ Flash).
 class CameraService extends ChangeNotifier {
 
-  // 1. STATE
-  /// Controller chính cho mọi tương tác với camera.
+  // --- 1. TRẠNG THÁI (STATE) ---
+
+  /// [CameraController] là đối tượng điều khiển chính để truy cập vào luồng dữ liệu camera.
   late CameraController _cameraController;
 
-  /// Future để theo dõi quá trình khởi tạo camera.
+  /// Future dùng để theo dõi trạng thái bất đồng bộ của quá trình khởi tạo.
+  /// Giúp UI biết khi nào nên hiển thị 'Loading' và khi nào hiển thị 'Preview'.
   late Future<void> initializeControllerFuture;
 
-  /// Danh sách camera có sẵn trên thiết bị.
+  /// Lưu trữ danh sách các ống kính có sẵn (trước, sau, góc rộng...).
   List<CameraDescription> _cameras = [];
 
-  /// Chế độ flash hiện tại (off, always, auto, torch).
+  /// Trạng thái đèn Flash hiện tại.
   FlashMode _currentFlashMode = FlashMode.off;
 
-  /// Cờ báo hiệu camera đã sẵn sàng hiển thị preview.
+  /// Cờ kiểm tra trạng thái sẵn sàng để tránh gọi lệnh khi camera chưa nạp xong.
   bool _isInitialized = false;
 
-  final _log = Logger('CameraServide'); // Tạo đối tượng lưu log
+  /// Logger giúp theo dõi lịch sử hoạt động và bắt lỗi trong quá trình vận hành.
+  final _log = Logger('CameraService');
 
-  // 2. GETTERS
+  // --- 2. CÁC HÀM TRUY XUẤT (GETTERS) ---
+
   CameraController get controller => _cameraController;
   FlashMode get currentFlashMode => _currentFlashMode;
   bool get isInitialized => _isInitialized;
 
-  // 3. INITIALIZATION
-  /// Khởi tạo và kết nối tới phần cứng camera.
+  // --- 3. KHỞI TẠO (INITIALIZATION) ---
+
+  /// Hàm [initialize] thiết lập kết nối giữa ứng dụng và phần cứng camera.
   Future<void> initialize() async {
     try {
-      // Lấy danh sách camera có sẵn.
+      // Bước 1: Hỏi hệ điều hành danh sách camera khả dụng.
       _cameras = await availableCameras();
       if (_cameras.isEmpty) {
-        _log.severe("No cameras found on this device.");
+        _log.severe("Không tìm thấy camera trên thiết bị này.");
         return;
       }
 
-      // Khởi tạo controller với camera được chọn và độ phân giải cao.
-      // Tắt audio vì không cần thiết cho việc chụp ảnh (nâng cao hiệu năng).
+      // Bước 2: Khởi tạo controller.
+      // ResolutionPreset.high (720p/1080p) là lựa chọn tối ưu:
+      // Đủ nét để AI nhận diện vật thể nhỏ nhưng không quá nặng làm lag UI.
       _cameraController = CameraController(
-        _cameras[0], // Chọn mặc định camera sau - 0
-        ResolutionPreset.high, // Thông thường khoảng 1280x720 (720p) giúp tối ưu ảnh đưa vào mô hình
-        enableAudio: false,
+        _cameras[0], // Mặc định chọn camera sau.
+        ResolutionPreset.high,
+        enableAudio: false, // Tắt audio giúp tiết kiệm tài nguyên và quyền truy cập.
       );
 
-      // Bắt đầu quá trình khởi tạo và đợi hoàn tất.
+      // Bước 3: Kích hoạt camera.
       initializeControllerFuture = _cameraController.initialize();
       await initializeControllerFuture;
 
-      // Cấu hình các chế độ mặc định sau khi khởi tạo thành công.
+      // Bước 4: Thiết lập cấu hình mặc định ban đầu.
       await _cameraController.setFlashMode(FlashMode.off);
-      await _cameraController.setFocusMode(FocusMode.auto);
+      await _cameraController.setFocusMode(FocusMode.auto); // Tự động lấy nét.
 
       _isInitialized = true;
-      _log.info("Camera initialized successfully.");
+      _log.info("Camera đã khởi tạo thành công.");
 
-      // Thông báo cho các widget listener (UI) để cập nhật.
+      // Cập nhật cho các Widget đang lắng nghe (ví dụ: CameraPreview).
       notifyListeners();
     } catch (e, stackTrace) {
-      // Ghi lại cả lỗi và stack trace để gỡ lỗi dễ hơn
-      _log.shout("Fatal error initializing camera", e, stackTrace);
+      _log.shout("Lỗi nghiêm trọng khi khởi tạo camera", e, stackTrace);
     }
   }
 
-  // 4. ACTIONS
-  /// Chụp ảnh và điều hướng tới màn hình xử lý.
+  // --- 4. CÁC HÀNH ĐỘNG (ACTIONS) ---
+
+  /// Chụp ảnh và chuyển hướng dữ liệu sang màn hình xử lý AI.
   Future<void> takePictureAndNavigate(BuildContext context) async {
-    // Đảm bảo camera đã sẵn sàng trước khi chụp.
+    // Chặn hành động nếu camera chưa sẵn sàng.
     if (!isInitialized) return;
 
     try {
-      // Chụp ảnh và lấy file.
+      // Chụp ảnh và lưu vào bộ nhớ tạm (Temporary Directory).
       final XFile imageFile = await _cameraController.takePicture();
 
-      // Tránh lỗi khi widget không còn trong cây (context is not mounted).
+      // Kiểm tra tính hợp lệ của context trước khi điều hướng trang.
       if (!context.mounted) return;
 
-      // Điều hướng sang CountingScreen, truyền đường dẫn ảnh để tiết kiệm bộ nhớ.
+      // Chuyển sang màn hình CountingScreen.
+      // Chỉ truyền Path (String) để tối ưu hiệu suất thay vì truyền cả file ảnh lớn.
       Navigator.push(
         context,
         MaterialPageRoute(
@@ -89,31 +97,34 @@ class CameraService extends ChangeNotifier {
         ),
       );
     } catch (e, stackTrace) {
-      _log.severe('Error taking picture', e, stackTrace);
+      _log.severe('Lỗi khi chụp ảnh', e, stackTrace);
     }
   }
 
-  /// Chuyển đổi giữa các chế độ flash (Off <-> Always).
+  /// Chuyển đổi trạng thái đèn Flash giữa Tắt và Luôn bật (Torch).
   void toggleFlashMode() async {
-    // Xác định chế độ mới.
+    if (!_isInitialized) return;
+
+    // Logic chuyển đổi đơn giản: Nếu đang tắt thì bật, và ngược lại.
     final newMode = _currentFlashMode == FlashMode.off ? FlashMode.always : FlashMode.off;
 
     try {
       await _cameraController.setFlashMode(newMode);
       _currentFlashMode = newMode;
 
-      // Cập nhật UI.
+      // Thông báo để UI thay đổi icon đèn Flash tương ứng.
       notifyListeners();
     } catch (e, stackTrace) {
-      _log.severe("Error setting flash mode", e, stackTrace);
+      _log.severe("Lỗi khi thiết lập chế độ Flash", e, stackTrace);
     }
   }
 
-  // 5. LIFECYCLE
+  // --- 5. GIẢI PHÓNG TÀI NGUYÊN (LIFECYCLE) ---
+
   @override
   void dispose() {
-    // Quan trọng: Giải phóng controller để camera có thể được sử dụng bởi
-    // các ứng dụng khác và tránh rò rỉ bộ nhớ, hao pin.
+    // CỰC KỲ QUAN TRỌNG: Phải đóng luồng camera khi không sử dụng.
+    // Nếu không, camera sẽ bị treo, gây nóng máy và các app khác không thể truy cập camera.
     _cameraController.dispose();
     super.dispose();
   }

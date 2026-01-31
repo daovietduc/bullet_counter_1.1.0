@@ -4,35 +4,37 @@ import 'package:image_picker/image_picker.dart';
 import '../screens/counting_screen.dart';
 import '../helpers/ui_helpers.dart';
 
-// Đã chuyển thành StatefulWidget để quản lý trạng thái tải khi mở thư viện.
-class BottomToolbar extends StatefulWidget {
-  /// Callback được gọi khi người dùng nhấn nút chụp ảnh.
+/// [CameraBottomBar] là thanh điều khiển phía dưới của màn hình Camera.
+/// Nó bao gồm 3 chức năng chính: Truy cập thư viện ảnh, Chụp ảnh mới, và Xem lịch sử.
+class CameraBottomBar extends StatefulWidget {
+  /// Callback thực thi hành động chụp ảnh (thường gọi đến CameraController ở màn hình cha).
   final VoidCallback onTakePhoto;
 
-  const BottomToolbar({super.key, required this.onTakePhoto});
+  const CameraBottomBar({super.key, required this.onTakePhoto});
 
   @override
-  State<BottomToolbar> createState() => _BottomToolbarState();
+  State<CameraBottomBar> createState() => _CameraBottomBarState();
 }
 
-class _BottomToolbarState extends State<BottomToolbar> {
-  // Biến trạng thái để theo dõi quá trình mở thư viện ảnh.
+class _CameraBottomBarState extends State<CameraBottomBar> {
+  /// Trạng thái theo dõi quá trình mở thư viện để hiển thị Loading Spinner.
   bool _isPickingImage = false;
 
-  /// Mở thư viện và cho phép người dùng chọn một ảnh.
-  /// Hiển thị chỉ báo tải để cải thiện trải nghiệm người dùng.
+  /// Xử lý logic chọn ảnh từ thư viện của thiết bị.
   Future<void> _pickImageFromGallery(BuildContext context) async {
-    // Ngăn người dùng nhấn nhiều lần khi đang xử lý.
+    // Chặn hành động nếu đang trong quá trình xử lý ảnh trước đó.
     if (_isPickingImage) return;
 
     try {
-      // Cập nhật UI để hiển thị loading ngay lập tức.
       setState(() {
         _isPickingImage = true;
       });
 
       final ImagePicker picker = ImagePicker();
-      // [TỐI ƯU HÓA] Yêu cầu picker giảm kích thước ảnh trước khi trả về.
+
+      // [TỐI ƯU HÓA HIỆU SUẤT]:
+      // Giới hạn kích thước ảnh (1024x1024) và chất lượng (85%) ngay khi chọn.
+      // Điều này giúp tiết kiệm bộ nhớ RAM khi AI xử lý và giảm nguy cơ lỗi Crash (Out of Memory).
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 1024,
@@ -40,10 +42,10 @@ class _BottomToolbarState extends State<BottomToolbar> {
         imageQuality: 85,
       );
 
-      // Thoát nếu context không còn hợp lệ hoặc người dùng không chọn ảnh.
+      // Kiểm tra tính hợp lệ của Context (đề phòng người dùng đã thoát màn hình khi đang chọn).
       if (!context.mounted || pickedFile == null) return;
 
-      // Điều hướng đến màn hình đếm với ảnh đã chọn.
+      // Điều hướng người dùng sang màn hình kết quả kèm theo đường dẫn ảnh đã chọn.
       await Navigator.push(
         context,
         MaterialPageRoute(
@@ -55,7 +57,7 @@ class _BottomToolbarState extends State<BottomToolbar> {
         UIHelper.showErrorSnackBar(context, 'Lỗi mở thư viện: $e');
       }
     } finally {
-      // Luôn đảm bảo ẩn loading khi quá trình kết thúc.
+      // Đảm bảo trạng thái Loading được tắt dù thành công hay thất bại.
       if (mounted) {
         setState(() {
           _isPickingImage = false;
@@ -67,20 +69,20 @@ class _BottomToolbarState extends State<BottomToolbar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black,
+      color: Colors.black, // Màu nền đen đặc trưng của giao diện nhiếp ảnh.
       child: Column(
-        mainAxisSize: MainAxisSize.min, // Chỉ chiếm không gian cần thiết.
+        mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // Thêm padding để tạo khoảng trống an toàn và cân đối.
           Padding(
+            // Padding dưới (32.0) thường được dùng để tránh đè lên thanh Home của iOS/Android.
             padding: const EdgeInsets.fromLTRB(24.0, 16.0, 24.0, 32.0),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween, // Căn đều các phần tử.
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                _buildAlbumButton(context),   // Nút mở thư viện ảnh.
-                _buildCaptureButton(),        // Nút chụp ảnh chính.
-                _buildHistoryButton(context), // Nút xem lịch sử.
+                _buildAlbumButton(context),   // Nút Thư viện (Trái)
+                _buildCaptureButton(),        // Nút Chụp (Giữa)
+                _buildHistoryButton(context), // Nút Lịch sử (Phải)
               ],
             ),
           ),
@@ -89,7 +91,7 @@ class _BottomToolbarState extends State<BottomToolbar> {
     );
   }
 
-  /// Widget cho nút mở thư viện ảnh với chỉ báo tải.
+  /// Nút mở Album ảnh: Có tích hợp hiệu ứng Loading khi đang xử lý.
   Widget _buildAlbumButton(BuildContext context) {
     return GestureDetector(
       onTap: () => _pickImageFromGallery(context),
@@ -97,10 +99,9 @@ class _BottomToolbarState extends State<BottomToolbar> {
         width: 60,
         height: 60,
         decoration: BoxDecoration(
-          color: Colors.white.withAlpha(50),
+          color: Colors.white.withAlpha(50), // Hiệu ứng làm mờ nhẹ (Frosted glass).
           borderRadius: BorderRadius.circular(8.0),
         ),
-        // Hiển thị vòng xoay tải hoặc icon tùy thuộc vào trạng thái.
         child: _isPickingImage
             ? const Center(
           child: SizedBox(
@@ -121,10 +122,9 @@ class _BottomToolbarState extends State<BottomToolbar> {
     );
   }
 
-  /// Widget cho nút chụp ảnh.
+  /// Nút Chụp ảnh: Thiết kế theo tiêu chuẩn Camera truyền thống (Vòng tròn lồng nhau).
   Widget _buildCaptureButton() {
     return GestureDetector(
-      // Gọi callback onTakePhoto từ widget cha thông qua 'widget.'.
       onTap: widget.onTakePhoto,
       child: Container(
         width: 70,
@@ -132,13 +132,11 @@ class _BottomToolbarState extends State<BottomToolbar> {
         decoration: BoxDecoration(
           color: Colors.transparent,
           shape: BoxShape.circle,
-          // Viền ngoài.
           border: Border.all(
             color: Colors.white,
-            width: 4.0,
+            width: 4.0, // Viền ngoài dày tạo điểm nhấn.
           ),
         ),
-        // Vòng tròn trắng bên trong.
         child: Center(
           child: Container(
             width: 60,
@@ -153,7 +151,7 @@ class _BottomToolbarState extends State<BottomToolbar> {
     );
   }
 
-  /// Widget cho nút lịch sử (hiện đang hiển thị thông báo bảo trì).
+  /// Nút Lịch sử: Hiện tại đang để chế độ chờ phát triển (Maintenance).
   Widget _buildHistoryButton(BuildContext context) {
     return GestureDetector(
       onTap: () {

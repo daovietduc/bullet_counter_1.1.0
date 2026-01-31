@@ -1,23 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
 
-/// Một widget Drawer để hiển thị các tùy chọn cài đặt giao diện.
-/// Cho phép người dùng bật/tắt các yếu tố như bounding box, độ tin cậy,
-/// cũng như tùy chỉnh màu sắc và độ trong suốt của chúng.
-class DisplayOptionsDrawer extends StatelessWidget {
-  // Trạng thái của các tùy chọn hiển thị
-  final bool showBoundingBoxes;
-  final bool showConfidence;
-  final bool showFillBox;
-  final bool showOrderNumber;
-  final bool isMultiColor;
-  final double fillOpacity;
-  final Color boxColor;
+/// [DisplayOptions] là một Widget dạng Drawer (thanh kéo từ cạnh màn hình).
+/// Widget này cung cấp giao diện để người dùng tùy chỉnh cách hiển thị kết quả AI,
+/// bao gồm việc bật/tắt các lớp vẽ (overlays) và thay đổi thẩm mỹ của chúng.
+class DisplayOptions extends StatelessWidget {
+  // --- CÁC TRẠNG THÁI HIỂN THỊ HIỆN TẠI ---
+  final bool showBoundingBoxes; // Hiển thị khung bao quanh vật thể
+  final bool showConfidence;    // Hiển thị % độ tin cậy của AI
+  final bool showFillBox;       // Có tô màu vào bên trong khung bao hay không
+  final bool showOrderNumber;   // Hiển thị số thứ tự (1, 2, 3...) cho từng vật thể
+  final bool isMultiColor;      // Bật chế độ mỗi vật thể một màu ngẫu nhiên
+  final double fillOpacity;     // Mức độ đậm nhạt của màu nền khung (0.0 -> 1.0)
+  final Color boxColor;         // Màu sắc chủ đạo của khung bao
 
-  /// Callback được gọi khi một tùy chọn thay đổi.
+  /// Callback [onOptionChanged] dùng để thông báo cho màn hình cha cập nhật State.
+  /// [key]: Tên thuộc tính cần thay đổi (vd: 'box', 'opacity').
+  /// [value]: Giá trị mới của thuộc tính đó.
   final Function(String key, dynamic value) onOptionChanged;
 
-  const DisplayOptionsDrawer({
+  const DisplayOptions({
     super.key,
     required this.showBoundingBoxes,
     required this.showConfidence,
@@ -32,11 +34,12 @@ class DisplayOptionsDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Drawer(
+      // Độ rộng Drawer chiếm 75% chiều rộng màn hình
       width: MediaQuery.of(context).size.width * 0.75,
-      backgroundColor: const Color(0xFFF2F2F7), // Màu nền xám nhạt (kiểu iOS)
+      backgroundColor: const Color(0xFFF2F2F7), // Màu nền xám nhạt đặc trưng của iOS
       child: Column(
         children: [
-          _buildHeader(context),
+          _buildHeader(context), // Thanh tiêu đề trên cùng
           Expanded(
             child: ListView(
               padding: EdgeInsets.zero,
@@ -104,6 +107,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
                   ),
                 ),
 
+                // Ghi chú nhỏ cho người dùng ở cuối danh sách
                 const Padding(
                   padding: EdgeInsets.all(16.0),
                   child: Text(
@@ -120,7 +124,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng phần header cho drawer.
+  /// Xây dựng thanh tiêu đề cho Drawer với nút đóng (X)
   Widget _buildHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.only(top: 50, bottom: 20, left: 16, right: 16),
@@ -145,7 +149,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng tiêu đề cho một nhóm cài đặt.
+  /// Phân đoạn tiêu đề nhóm (Section Header)
   Widget _buildSectionTitle(String title) {
     return Padding(
       padding: const EdgeInsets.only(left: 16, top: 20, bottom: 8),
@@ -156,7 +160,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng một mục cài đặt có công tắc (toggle switch).
+  /// Mục cài đặt dạng Bật/Tắt sử dụng [CupertinoSwitch] để có giao diện mượt mà
   Widget _buildToggleItem({
     required String label,
     required IconData icon,
@@ -174,7 +178,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng một mục để chọn độ trong suốt.
+  /// Mục hiển thị giá trị độ trong suốt hiện tại và cho phép nhấn để chọn lại
   Widget _buildOpacityPickerItem({
     required String label,
     required double currentOpacity,
@@ -197,7 +201,7 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng một mục để chọn màu sắc.
+  /// Mục hiển thị màu sắc hiện tại dưới dạng một vòng tròn nhỏ (Color Indicator)
   Widget _buildColorPickerItem({required String label, required Color currentColor, required VoidCallback onTap}) {
     return ListTile(
       onTap: onTap,
@@ -215,10 +219,8 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Hiển thị hộp thoại (Action Sheet) để chọn màu.
+  /// Mở một menu dạng [CupertinoActionSheet] để người dùng chọn từ danh sách màu định sẵn
   void _showColorPickerDialog(BuildContext context) {
-    // Danh sách các màu có sẵn để chọn
-    // Chuyển thành static const để không phải tạo lại mỗi lần hàm được gọi
     const List<Map<String, dynamic>> colorOptions = [
       {'name': 'Đỏ', 'color': Colors.red},
       {'name': 'Xanh lá', 'color': Colors.green},
@@ -246,12 +248,10 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Hiển thị hộp thoại (Action Sheet) để chọn độ trong suốt.
+  /// Mở menu để chọn các mức độ trong suốt (Opacity)
   void _showOpacityPickerDialog(BuildContext context) {
-    // Danh sách các mức độ trong suốt có sẵn
-    // Chuyển thành static const để không phải tạo lại mỗi lần hàm được gọi
     const List<Map<String, dynamic>> opacityOptions = [
-      {'label': 'Trong suốt (0%)', 'value': 0},
+      {'label': 'Trong suốt (0%)', 'value': 0.0},
       {'label': 'Mờ nhẹ (25%)', 'value': 0.25},
       {'label': 'Mờ vừa (50%)', 'value': 0.5},
       {'label': 'Mờ cao (75%)', 'value': 0.75},
@@ -277,11 +277,11 @@ class DisplayOptionsDrawer extends StatelessWidget {
     );
   }
 
-  /// Xây dựng một đường kẻ phân cách.
+  /// Tạo đường kẻ phân cách ngắn (không kéo dài hết sang lề trái), giống style iOS Settings
   Widget _buildDivider() {
     return const Divider(
       height: 1,
-      indent: 56, // Căn lề trái để thẳng hàng với tiêu đề của ListTile
+      indent: 56, // Thừa ra một khoảng để thẳng hàng với text (sau icon)
       color: Color(0xFFE5E5EA),
     );
   }

@@ -1,8 +1,15 @@
 import 'package:flutter/material.dart';
 
+/// [ModeSelector] là một Widget nút bấm nhỏ (thường nằm ở góc) hiển thị ảnh đại diện
+/// của chế độ hiện tại. Khi nhấn vào sẽ mở ra bảng chọn danh sách các chế độ.
 class ModeSelector extends StatelessWidget {
+  /// Callback trả về dữ liệu chế độ được chọn: [classId], [modeName], [modeImage]
   final Function(int classId, String modeName, String modeImage) onModeSelected;
+
+  /// Tên chế độ đang được áp dụng để hiển thị trạng thái 'đã chọn'
   final String currentModeName;
+
+  /// Đường dẫn ảnh của chế độ hiện tại
   final String? currentModeImage;
 
   const ModeSelector({
@@ -12,11 +19,12 @@ class ModeSelector extends StatelessWidget {
     this.currentModeImage,
   });
 
+  /// Hiển thị bảng chọn chế độ từ dưới lên (Bottom Sheet)
   void _showModeSelectionSheet(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
+      isScrollControlled: true, // Cho phép sheet cao hơn nếu nội dung nhiều
+      backgroundColor: Colors.transparent, // Để lộ bo góc của Container bên trong
       builder: (context) {
         return _ModeSelectorSheetContent(
           onModeSelected: onModeSelected,
@@ -35,7 +43,7 @@ class ModeSelector extends StatelessWidget {
         height: 45,
         width: 45,
         decoration: BoxDecoration(
-          // Cập nhật: Sử dụng withValues thay cho withOpacity
+          // Sử dụng withValues (API mới của Flutter) để tùy chỉnh độ trong suốt
           color: Colors.white.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
@@ -51,6 +59,7 @@ class ModeSelector extends StatelessWidget {
     );
   }
 
+  /// Widget hiển thị ảnh chế độ, xử lý trường hợp ảnh lỗi hoặc không có ảnh
   Widget _buildImageWidget(String? imagePath) {
     if (imagePath != null && imagePath.isNotEmpty) {
       return Image.asset(
@@ -65,6 +74,8 @@ class ModeSelector extends StatelessWidget {
   }
 }
 
+/// [_ModeSelectorSheetContent] nội dung bên trong của bảng chọn chế độ.
+/// Được tách ra thành một Private Class để code sạch sẽ và dễ quản lý.
 class _ModeSelectorSheetContent extends StatelessWidget {
   final Function(int classId, String modeName, String modeImage) onModeSelected;
   final String currentModeName;
@@ -76,6 +87,8 @@ class _ModeSelectorSheetContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // DANH SÁCH CÁC CHẾ ĐỘ ĐẾM (Hard-coded)
+    // Lưu ý: Trong thực tế, danh sách này có thể lấy từ một file cấu hình hoặc API.
     final List<Map<String, dynamic>> modes = [
       {"name": "K51", "image": "assets/images/K51.png", "classID": 0},
       {"name": "K59", "image": "assets/images/K59.png", "classID": 1},
@@ -88,14 +101,14 @@ class _ModeSelectorSheetContent extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: const BoxDecoration(
-        color: Color(0xFFF5F5F7),
+        color: Color(0xFFF5F5F7), // Màu nền xám nhạt kiểu iOS
         borderRadius: BorderRadius.vertical(top: Radius.circular(30)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        mainAxisSize: MainAxisSize.min, // Chỉ chiếm không gian vừa đủ với nội dung
         children: [
-          // 1. Khoảng cách trên cùng
           const SizedBox(height: 12),
+          // Thanh Handle nhỏ trên cùng để người dùng biết có thể vuốt xuống để đóng
           Container(
             height: 5,
             width: 45,
@@ -104,7 +117,6 @@ class _ModeSelectorSheetContent extends StatelessWidget {
               borderRadius: BorderRadius.circular(10),
             ),
           ),
-          // 2. Khoảng cách giữa handle và tiêu đề
           const SizedBox(height: 16),
           const Text(
             "Select Bullet Type",
@@ -114,17 +126,17 @@ class _ModeSelectorSheetContent extends StatelessWidget {
               color: Colors.black87,
             ),
           ),
-          // 3. Khoảng cách giữa tiêu đề và lưới
           const SizedBox(height: 24),
+          // Hiển thị danh sách chế độ dưới dạng lưới (Grid)
           GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
+            shrinkWrap: true, // Quan trọng: Cho phép GridView nằm trong Column
+            physics: const NeverScrollableScrollPhysics(), // Để Scroll theo Column mẹ
             padding: const EdgeInsets.only(bottom: 30),
             gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              crossAxisSpacing: 15,
-              mainAxisSpacing: 15,
-              childAspectRatio: 0.85,
+              crossAxisCount: 3,        // 3 cột mỗi hàng
+              crossAxisSpacing: 15,     // Khoảng cách ngang giữa các item
+              mainAxisSpacing: 15,      // Khoảng cách dọc giữa các item
+              childAspectRatio: 0.85,   // Tỷ lệ khung hình của mỗi ô item
             ),
             itemCount: modes.length,
             itemBuilder: (context, index) {
@@ -133,6 +145,7 @@ class _ModeSelectorSheetContent extends StatelessWidget {
 
               return InkWell(
                 onTap: () {
+                  // Gọi callback và đóng bảng chọn
                   onModeSelected(mode["classID"], mode["name"], mode["image"]);
                   Navigator.pop(context);
                 },
@@ -142,13 +155,13 @@ class _ModeSelectorSheetContent extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(20),
+                    // Hiển thị viền xanh nếu chế độ này đang được chọn
                     border: Border.all(
                       color: isSelected ? Colors.blueAccent : Colors.transparent,
                       width: 2.5,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        // Cập nhật: withValues cho shadow
                         color: Colors.black.withValues(alpha: 0.06),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
@@ -158,6 +171,7 @@ class _ModeSelectorSheetContent extends StatelessWidget {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
+                      // Hiển thị ảnh minh họa loại đạn
                       Expanded(
                         child: Container(
                           margin: const EdgeInsets.all(10),
@@ -170,8 +184,8 @@ class _ModeSelectorSheetContent extends StatelessWidget {
                           ),
                         ),
                       ),
-                      // Khoảng cách giữa ảnh và text
                       const SizedBox(height: 4),
+                      // Tên loại đạn
                       Padding(
                         padding: const EdgeInsets.only(bottom: 12, left: 4, right: 4),
                         child: Text(

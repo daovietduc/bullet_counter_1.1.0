@@ -6,20 +6,21 @@ import 'package:flutter/services.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 
-import '../services/detection_processor.dart';
-import '../widgets/menu_mode_selector.dart';
+// Import các thành phần giao diện (Widgets)
+import '../widgets/counting_image_display.dart';
+import '../widgets/counting_bottom_bar.dart';
 import '../widgets/menu_display_options.dart';
+
+// Import các dịch vụ xử lý logic (Services)
 import '../services/counting_service.dart';
 import '../services/preferences_service.dart';
 import '../models/detection_result.dart';
 import '../helpers/ui_helpers.dart';
-import './bounding_box_painter.dart';
 
-/// [CountingScreen] là lớp quản lý giao diện và logic chính của tính năng đếm đối tượng.
-/// Màn hình này chịu trách nhiệm hiển thị ảnh, điều phối quá trình suy luận AI (Inference)
-/// và hiển thị các lớp phủ đồ họa (Bounding Boxes) dựa trên kết quả trả về.
+/// [CountingScreen] là màn hình chính thực hiện chức năng nhận diện và đếm đối tượng.
+/// Màn hình này nhận vào một [imagePath] để hiển thị và xử lý AI.
 class CountingScreen extends StatefulWidget {
-  final String imagePath; // Đường dẫn vật lý của tệp ảnh được chọn.
+  final String imagePath;
 
   const CountingScreen({super.key, required this.imagePath});
 
@@ -28,45 +29,49 @@ class CountingScreen extends StatefulWidget {
 }
 
 class _CountingScreenState extends State<CountingScreen> {
-  // --- CORE CONTROLLERS ---
-  // Chụp ảnh màn hình bao gồm cả phần vẽ CustomPaint.
+  // --- BỘ ĐIỀU KHIỂN (CONTROLLERS) ---
+
+  /// Chụp màn hình vùng widget để lưu kết quả
   final ScreenshotController _screenshotController = ScreenshotController();
-  // Xử lý logic tải model và gọi hàm đếm.
+
+  /// Dịch vụ xử lý nhận diện AI (YOLO)
   final CountingService _countingService = CountingService();
-  // Quản lý lưu trữ cục bộ các tùy chọn người dùng.
+
+  /// Dịch vụ lưu trữ cấu hình người dùng (SharedPreferences)
   final PreferencesService _prefsService = PreferencesService();
 
-  // --- UI DISPLAY STATE (Các biến điều khiển trạng thái hiển thị) ---
-  bool _showBoundingBoxes = true;
-  bool _showConfidence = true;
-  bool _showFillBox = false;
-  bool _showOrderNumber = false;
-  bool _isMultiColor = true;
-  double _fillOpacity = 0.4;
-  Color _boxColor = Colors.amber;
+  // --- TRẠNG THÁI: TÙY CHỌN HIỂN THỊ (DISPLAY OPTIONS) ---
+  bool _showBoundingBoxes = true; // Hiển thị khung bao
+  bool _showConfidence = true;    // Hiển thị độ tin cậy (%)
+  bool _showFillBox = false;      // Tô màu nền khung bao
+  bool _showOrderNumber = false;  // Hiển thị số thứ tự đếm
+  bool _isMultiColor = true;      // Sử dụng nhiều màu cho các đối tượng
+  double _fillOpacity = 0.4;      // Độ trong suốt của màu nền
+  Color _boxColor = Colors.amber; // Màu sắc mặc định của khung
 
-  // --- DATA & PROCESSING STATE ---
-  List<DetectionResult> _detectionResults = []; // Chứa danh sách đối tượng AI tìm được.
-  bool _isCounting = false; // Trạng thái xử lý để hiển thị Loading UI và chặn tương tác thừa.
-  ui.Image? _originalImage; // Lưu trữ cấu trúc ảnh gốc để tính toán tỷ lệ khung hình (Aspect Ratio).
-  SelectedMode? _selectedMode; // Chế độ đếm hiện tại (định nghĩa class mục tiêu cho AI).
+  // --- TRẠNG THÁI: DỮ LIỆU (DATA STATE) ---
+  List<DetectionResult> _detectionResults = []; // Danh sách kết quả từ AI
+  bool _isCounting = false;                     // Trạng thái đang xử lý
+  ui.Image? _originalImage;                     // Đối tượng ảnh gốc để vẽ Canvas
+  SelectedMode? _selectedMode;                  // Chế độ đếm hiện tại (vd: đếm đạn, đếm gạch...)
 
   @override
   void initState() {
     super.initState();
-    _loadPreferences(); // Khởi tạo các cấu hình hiển thị đã lưu.
-    _loadImage();       // Giải mã ảnh ngay khi vào màn hình.
+    _loadPreferences(); // Tải cấu hình đã lưu trước đó
+    _loadImage();       // Giải mã file ảnh thành object ui.Image
   }
 
   @override
   void dispose() {
-    // [QUAN TRỌNG]: Giải phóng bộ nhớ RAM từ các đối tượng đồ họa cấp thấp và Model AI.
     _originalImage?.dispose();
     _countingService.dispose();
     super.dispose();
   }
 
-  /// Tải cấu hình hiển thị từ bộ nhớ cục bộ (SharedPreferences).
+  // --- LOGIC: KHỞI TẠO (INITIALIZATION) ---
+
+  /// Tải các cài đặt người dùng từ bộ nhớ máy
   Future<void> _loadPreferences() async {
     final loadedMode = await _prefsService.loadSelectedMode();
     final displayPrefs = await _prefsService.loadDisplayPreferences();
@@ -84,43 +89,41 @@ class _CountingScreenState extends State<CountingScreen> {
     }
   }
 
-  /// Giải mã tệp ảnh thành đối tượng [ui.Image] để lấy kích thước điểm ảnh (pixel) chính xác.
+  /// Chuyển đổi file ảnh từ đường dẫn thành định dạng [ui.Image] để xử lý đồ họa
   Future<void> _loadImage() async {
-    final data = await File(widget.imagePath).readAsBytes();
-    final image = await decodeImageFromList(data);
-    if (mounted) setState(() => _originalImage = image);
-  }
-
-  /// [HÀM XỬ LÝ TRÊN ISOLATE]: Đây là hàm tĩnh chạy trên một luồng CPU riêng biệt.
-  /// Việc đưa logic xử lý mô hình AI vào đây giúp Main Thread (Giao diện) không bị giật lag
-  /// khi CPU thực hiện các phép toán nặng của mô hình TFLite.
-  static Future<void> _runInferenceIsolate(Map<String, dynamic> params) async {
-    final SendPort sendPort = params['sendPort']; // Cổng gửi dữ liệu về Main Isolate.
-
     try {
-      final String imagePath = params['imagePath'];
-      final Uint8List modelBytes = params['modelBytes'];
-      final int targetClass = params['targetClass'];
-      final List<String> labels = List<String>.from(params['labels']);
-
-      final isolateService = CountingService();
-
-      try {
-        // Tải model và thực hiện suy luận trong môi trường Isolate.
-        await isolateService.loadModelFromBytes(modelBytes, labels);
-        final results = await isolateService.countObjects(imagePath, targetClass: targetClass);
-
-        // Gửi kết quả về cho UI.
-        sendPort.send(results);
-      } finally {
-        isolateService.dispose();
-      }
+      final data = await File(widget.imagePath).readAsBytes();
+      final image = await decodeImageFromList(data);
+      if (mounted) setState(() => _originalImage = image);
     } catch (e) {
-      sendPort.send(<DetectionResult>[]); // Gửi danh sách rỗng nếu có lỗi xảy ra.
+      debugPrint("Lỗi tải ảnh: $e");
     }
   }
 
-  /// Khởi động quy trình đếm đối tượng.
+  // --- LOGIC: XỬ LÝ AI (ISOLATE) ---
+
+  /// Hàm chạy độc lập (Isolate) để thực hiện AI inference mà không gây lag UI.
+  /// [params] chứa SendPort, byte model, nhãn và đường dẫn ảnh.
+  static Future<void> _runInferenceIsolate(Map<String, dynamic> params) async {
+    final SendPort sendPort = params['sendPort'];
+    final isolateService = CountingService();
+    try {
+      // Tải model vào bộ nhớ của Isolate
+      await isolateService.loadModelFromBytes(params['modelBytes'], params['labels']);
+      // Chạy nhận diện
+      final results = await isolateService.countObjects(
+          params['imagePath'],
+          targetClass: params['targetClass']
+      );
+      sendPort.send(results); // Gửi kết quả về main isolate
+    } catch (e) {
+      sendPort.send(<DetectionResult>[]); // Gửi danh sách rỗng nếu lỗi
+    } finally {
+      isolateService.dispose();
+    }
+  }
+
+  /// Kích hoạt quá trình đếm đối tượng sử dụng mô hình AI
   Future<void> _startCounting() async {
     if (_isCounting || _selectedMode == null) return;
 
@@ -132,32 +135,24 @@ class _CountingScreenState extends State<CountingScreen> {
     UIHelper.showLoadingIndicator(context, message: 'processing...');
 
     try {
-      // 1. Chuẩn bị dữ liệu Model từ Assets (Dữ liệu lớn cần được load dưới dạng Bytes).
+      // 1. Tải tài nguyên (labels và model)
       final labelsData = await rootBundle.loadString('assets/labels.txt');
-      final List<String> labelsList = labelsData.split('\n').map((l) =>
-          l.trim()).where((l) => l.isNotEmpty).toList();
-      final modelData = await rootBundle.load(
-          'assets/yolo11m_obb_bullet_couter_preview_float16.tflite');
-      final Uint8List modelBytes = modelData.buffer.asUint8List();
+      final labelsList = labelsData.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      final modelData = await rootBundle.load('assets/yolo11m_obb_bullet_couter_preview_float16.tflite');
+      final modelBytes = modelData.buffer.asUint8List();
 
-      // 2. Thiết lập kênh giao tiếp giữa các luồng.
+      // 2. Thiết lập Isolate để tránh đứng hình (UI jank)
       final receivePort = ReceivePort();
+      await Isolate.spawn(_runInferenceIsolate, {
+        'sendPort': receivePort.sendPort,
+        'imagePath': widget.imagePath,
+        'modelBytes': modelBytes,
+        'targetClass': _selectedMode!.targetClass,
+        'labels': labelsList,
+      });
 
-      // 3. Spawn Isolate mới để chạy AI tách biệt với UI.
-      await Isolate.spawn(
-        _runInferenceIsolate,
-        {
-          'sendPort': receivePort.sendPort,
-          'imagePath': widget.imagePath,
-          'modelBytes': modelBytes,
-          'targetClass': _selectedMode!.targetClass,
-          'labels': labelsList,
-        },
-      );
-
-      // 4. Nhận kết quả đầu tiên trả về và đóng cổng.
+      // 3. Nhận kết quả và cập nhật giao diện
       final results = await receivePort.first as List<DetectionResult>;
-
       if (mounted) {
         setState(() => _detectionResults = results);
       }
@@ -171,18 +166,18 @@ class _CountingScreenState extends State<CountingScreen> {
     }
   }
 
-  /// Chụp lại màn hình hiện tại (bao gồm ảnh gốc và các Bounding Box đã vẽ) để lưu vào máy.
+  // --- LOGIC: HÀNH ĐỘNG (ACTIONS) ---
+
+  /// Chụp ảnh màn hình kết quả và lưu vào thư viện ảnh của thiết bị
   Future<void> _saveImageToGallery() async {
     if (!mounted || _isCounting) return;
 
     UIHelper.showLoadingIndicator(context, message: 'Đang chuẩn bị ảnh...');
-    await Future.delayed(const Duration(milliseconds: 100));
-
     try {
-      // Chụp widget nằm trong Screenshot controller.
+      // Chụp widget nằm trong Screenshot controller
       final Uint8List? imageBytes = await _screenshotController.capture(
         delay: const Duration(milliseconds: 100),
-        pixelRatio: 2.0, // Tăng độ nét ảnh chụp lên gấp đôi.
+        pixelRatio: 2.0, // Tăng chất lượng ảnh lưu
       );
 
       if (imageBytes != null) {
@@ -192,7 +187,7 @@ class _CountingScreenState extends State<CountingScreen> {
           name: "Result_${DateTime.now().millisecondsSinceEpoch}",
         );
         if (mounted && result['isSuccess'] == true) {
-          UIHelper.showSuccessSnackBar(context, 'Đã lưu ảnh thành công!');
+          UIHelper.showSuccessSnackBar(context, 'Đã lưu ảnh vào thư viện!');
         }
       }
     } catch (e) {
@@ -202,29 +197,10 @@ class _CountingScreenState extends State<CountingScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final int totalCount = _detectionResults.length;
+  // --- THÀNH PHẦN GIAO DIỆN (UI COMPONENTS) ---
 
-    return PopScope(
-      canPop: false, // Ngăn chặn thoát màn hình vô ý khi đang xử lý.
-      child: Screenshot(
-        controller: _screenshotController,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          appBar: _buildAppBar(totalCount),
-          endDrawer: _buildDrawer(),
-          body: _buildImageBody(),
-          bottomNavigationBar: _buildBottomBar(),
-        ),
-      ),
-    );
-  }
-
-  // --- UI COMPONENTS (Tách nhỏ để dễ quản lý) ---
-
-  /// AppBar hiển thị số lượng đếm được và chế độ hiện tại.
-  PreferredSize _buildAppBar(int totalCount) {
+  /// Thanh AppBar tùy chỉnh hiển thị số lượng vật thể đếm được
+  PreferredSize _buildAppBar() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(70.0),
       child: AppBar(
@@ -235,186 +211,112 @@ class _CountingScreenState extends State<CountingScreen> {
           onPressed: () => Navigator.pop(context),
         ),
         title: Column(
-            children: [
-              RichText(
-                text: TextSpan(
-                  children: [
-                    const TextSpan(text: 'Target: ',
-                        style: TextStyle(fontFamily: 'Lexend',
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold)),
-                    TextSpan(text: '$totalCount',
-                        style: const TextStyle(fontFamily: 'Lexend',
-                            color: Colors.orangeAccent,
-                            fontSize: 28,
-                            fontWeight: FontWeight.bold)),
-                  ],
-                ),
+          children: [
+            RichText(
+              text: TextSpan(
+                children: [
+                  const TextSpan(text: 'Target: ',
+                      style: TextStyle(fontFamily: 'Lexend',
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold)),
+                  TextSpan(text: '${_detectionResults.length}',
+                      style: const TextStyle(fontFamily: 'Lexend',
+                          color: Colors.orangeAccent,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold)),
+                ],
               ),
-              const SizedBox(height: 5),
-              Text('- Mode: ${_selectedMode?.name ?? 'Chưa chọn'} -',
-                  style: const TextStyle(
-                      color: Colors.deepOrange, fontSize: 14)),
-            ]
+            ),
+            Text('- Mode: ${_selectedMode?.name ?? 'Chưa chọn'} -',
+                style: const TextStyle(color: Colors.deepOrange, fontSize: 14)),
+          ],
         ),
         actions: [
-          Builder(builder: (context) =>
-              IconButton(icon: const Icon(Icons.tune),
-                  onPressed: () => Scaffold.of(context).openEndDrawer())),
+          Builder(builder: (context) => IconButton(
+            icon: const Icon(Icons.tune, color: Colors.white), // Nút mở cài đặt hiển thị
+            onPressed: () => Scaffold.of(context).openEndDrawer(),
+          )),
         ],
       ),
     );
   }
 
-  /// Phần thân hiển thị ảnh và tính toán tỷ lệ khung hình hiển thị (Display Size vs Original Size).
-  Widget _buildImageBody() {
-    if (_originalImage == null) return const Center(child: CircularProgressIndicator(color: Colors.amber));
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // TÍNH TOÁN TỶ LỆ: Đảm bảo ảnh hiển thị đúng tỷ lệ gốc trong mọi kích thước màn hình.
-        double imgW = _originalImage!.width.toDouble();
-        double imgH = _originalImage!.height.toDouble();
-        double ratio = imgW / imgH;
-
-        double displayWidth = constraints.maxWidth;
-        double displayHeight = constraints.maxWidth / ratio;
-
-        if (displayHeight > constraints.maxHeight) {
-          displayHeight = constraints.maxHeight;
-          displayWidth = displayHeight * ratio;
-        }
-
-        return InteractiveViewer( // Cho phép người dùng Zoom và Pan ảnh.
-          clipBehavior: Clip.none,
-          minScale: 1.0,
-          maxScale: 4.0,
-          child: Center(
-            child: SizedBox(
-              width: displayWidth,
-              height: displayHeight,
-              child: Stack(
-                children: [
-                  Positioned.fill(child: Image.file(File(widget.imagePath), fit: BoxFit.fill)),
-
-                  // LỚP VẼ ĐỒ HỌA: Chuyển đổi tọa độ AI sang tọa độ màn hình.
-                  if (_detectionResults.isNotEmpty)
-                    Positioned.fill(
-                      child: Builder(
-                        builder: (context) {
-                          // Processor giúp tính toán tọa độ (Scaling) trước khi truyền vào Painter.
-                          final processedData = DetectionProcessor.process(
-                            results: _detectionResults,
-                            originalSize: Size(imgW, imgH),
-                            screenSize: Size(displayWidth, displayHeight),
-                            baseBoxColor: _boxColor,
-                            isMultiColor: _isMultiColor,
-                          );
-
-                          return CustomPaint(
-                            painter: BoundingBoxPainter(
-                              processedResults: processedData,
-                              showBoundingBoxes: _showBoundingBoxes,
-                              showConfidence: _showConfidence,
-                              showFillBox: _showFillBox,
-                              showOrderNumber: _showOrderNumber,
-                              fillOpacity: _fillOpacity,
-                            ),
-                          );
-                        },
-                      ),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  /// Drawer hiển thị các tùy chọn cấu hình.
-  Widget _buildDrawer() {
-    return DisplayOptionsDrawer(
-      showBoundingBoxes: _showBoundingBoxes,
-      showConfidence: _showConfidence,
-      showFillBox: _showFillBox,
-      showOrderNumber: _showOrderNumber,
-      isMultiColor: _isMultiColor,
-      fillOpacity: _fillOpacity,
-      boxColor: _boxColor,
-      onOptionChanged: (key, newValue) {
-        setState(() {
-          if (key == 'box') _showBoundingBoxes = newValue;
-          if (key == 'fill') _showFillBox = newValue;
-          if (key == 'order') _showOrderNumber = newValue;
-          if (key == 'confidence') _showConfidence = newValue;
-          if (key == 'multiColor') _isMultiColor = newValue;
-          if (key == 'opacity') _fillOpacity = newValue;
-          if (key == 'color') _boxColor = newValue;
-        });
-        _prefsService.saveDisplayPreferences(
-          DisplayPreferences(
+  @override
+  Widget build(BuildContext context) {
+    return PopScope(
+      canPop: false, // Ngăn chặn thoát bằng nút back hệ thống để kiểm soát trạng thái
+      child: Screenshot(
+        controller: _screenshotController,
+        child: Scaffold(
+          backgroundColor: Colors.black,
+          appBar: _buildAppBar(),
+          // Drawer bên phải chứa các tùy chỉnh hiển thị
+          endDrawer: DisplayOptions(
             showBoundingBoxes: _showBoundingBoxes,
             showConfidence: _showConfidence,
             showFillBox: _showFillBox,
             showOrderNumber: _showOrderNumber,
-            showMultiColor: _isMultiColor,
-            opacity: _fillOpacity,
+            isMultiColor: _isMultiColor,
+            fillOpacity: _fillOpacity,
+            boxColor: _boxColor,
+            onOptionChanged: (key, newValue) {
+              setState(() {
+                if (key == 'box') _showBoundingBoxes = newValue;
+                if (key == 'fill') _showFillBox = newValue;
+                if (key == 'order') _showOrderNumber = newValue;
+                if (key == 'confidence') _showConfidence = newValue;
+                if (key == 'multiColor') _isMultiColor = newValue;
+                if (key == 'opacity') _fillOpacity = newValue;
+                if (key == 'color') _boxColor = newValue;
+              });
+              // Lưu cấu hình ngay khi người dùng thay đổi
+              _prefsService.saveDisplayPreferences(DisplayPreferences(
+                showBoundingBoxes: _showBoundingBoxes,
+                showConfidence: _showConfidence,
+                showFillBox: _showFillBox,
+                showOrderNumber: _showOrderNumber,
+                showMultiColor: _isMultiColor,
+                opacity: _fillOpacity,
+                boxColor: _boxColor,
+              ));
+            },
+          ),
+          // Thành phần chính hiển thị ảnh và các khung nhận diện
+          body: ImageDisplay(
+            originalImage: _originalImage,
+            imagePath: widget.imagePath,
+            detectionResults: _detectionResults,
+            showBoundingBoxes: _showBoundingBoxes,
+            showConfidence: _showConfidence,
+            showFillBox: _showFillBox,
+            showOrderNumber: _showOrderNumber,
+            isMultiColor: _isMultiColor,
+            fillOpacity: _fillOpacity,
             boxColor: _boxColor,
           ),
-        );
-      },
-    );
-  }
+          // Thanh điều khiển phía dưới: Chọn mode, Nút Đếm, Nút Lưu
+          bottomNavigationBar: CountingBottomBar(
+            isCounting: _isCounting,
+            currentModeName: _selectedMode?.name ?? 'Chọn Mode',
+            currentModeImage: _selectedMode?.image,
+            onCountPressed: _startCounting,
+            onSavePressed: _saveImageToGallery,
+            onModeSelected: (id, name, img) {
+              final newMode = SelectedMode(
+                targetClass: id,
+                name: name,
+                image: img ?? '', // Xử lý null-safety
+              );
 
-  /// Thanh điều khiển dưới cùng với nút đếm chính.
-  Widget _buildBottomBar() {
-    return Container(
-      color: Colors.black,
-      padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
-      height: 120,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Align(
-            alignment: Alignment.center,
-            child: ElevatedButton(
-              onPressed: (_isCounting || _selectedMode == null) ? null : _startCounting,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange,
-                padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 5),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              ),
-              child: const Text('COUNT', style: TextStyle(color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                  fontFamily: 'Lexend')),
-            ),
+              _prefsService.saveSelectedMode(newMode);
+              setState(() {
+                _selectedMode = newMode;
+                _detectionResults = []; // Reset kết quả cũ để người dùng đếm lại theo mode mới
+              });
+            },
           ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.download_for_offline_rounded, color: Colors.white, size: 45),
-                onPressed: _isCounting ? null : _saveImageToGallery,
-              ),
-              ModeSelector(
-                currentModeName: _selectedMode?.name ?? 'Chọn Mode',
-                currentModeImage: _selectedMode?.image,
-                onModeSelected: (id, name, img) {
-                  final newMode = SelectedMode(targetClass: id, name: name, image: img);
-                  _prefsService.saveSelectedMode(newMode);
-                  setState(() {
-                    _selectedMode = newMode;
-                    _detectionResults = []; // Reset kết quả khi đổi chế độ.
-                  });
-                },
-              ),
-            ],
-          ),
-        ],
+        ),
       ),
     );
   }
