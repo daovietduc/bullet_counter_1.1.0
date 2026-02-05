@@ -43,10 +43,6 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
     try {
       setState(() => _isPickingImage = true);
 
-      // Tạm dừng Preview: Tránh việc CPU phải render video nền khi người dùng đang ở Gallery.
-      // Đồng thời giảm thiểu nguy cơ xung đột phần cứng trên một số dòng máy Android cũ.
-      await cameraService.pauseCamera();
-
       final ImagePicker picker = ImagePicker();
 
       // Mở trình chọn ảnh với cấu hình tối ưu cho AI:
@@ -60,12 +56,15 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
 
       // Xử lý khi người dùng hủy chọn ảnh (nhấn nút Back hệ thống).
       if (pickedFile == null) {
-        await cameraService.resumeCamera();
         if (mounted) setState(() => _isPickingImage = false);
         return;
       }
 
       if (!context.mounted) return;
+
+      // Tạm dừng Preview: Tránh việc CPU phải render video nền khi người dùng đang ở Gallery.
+      // Đồng thời giảm thiểu nguy cơ xung đột phần cứng trên một số dòng máy Android cũ.
+      await cameraService.pauseCamera();
 
       // Chuyển sang màn hình xử lý kết quả.
       // await ở đây giữ cho tiến trình chờ đợi cho đến khi CountingScreen được 'Pop'.

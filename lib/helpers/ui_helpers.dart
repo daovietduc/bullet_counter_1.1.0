@@ -88,10 +88,8 @@ class UIHelper {
                             color: Colors.white,
                             fontSize: 16,
                             fontFamily: 'Lexend',
-                            letterSpacing: 10.0,
-                            // Chữ thưa ra tạo cảm giác sang trọng/hiện đại
-                            decoration: TextDecoration.none,
-                            // Xóa gạch chân mặc định của Dialog
+                            letterSpacing: 7.0, // Chữ thưa ra tạo cảm giác sang trọng/hiện đại
+                            decoration: TextDecoration.none, // Xóa gạch chân mặc định của Dialog
                             shadows: [
                               Shadow(
                                 blurRadius: 15.0,
