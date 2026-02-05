@@ -35,6 +35,7 @@ import '../models/detection_result.dart'; // Model chứa kết quả: đỉnh x
 ///   5. data[4]: Confidence Score (Độ tin cậy từ 0.0 đến 1.0)
 ///   6. data[5]: Class ID (Số định danh loại vật thể: 0, 1, 2...)
 ///   7. data[6]: Angle (Góc xoay tính bằng Radian, thường từ -pi/2 đến pi/2)
+///
 /// ============================================================================
 
 class CountingService {

@@ -1,13 +1,19 @@
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:provider/provider.dart';
 
 import '../screens/counting_screen.dart';
 import '../helpers/ui_helpers.dart';
+import '../services/camera_service.dart';
 
-/// [CameraBottomBar] là thanh điều khiển phía dưới của màn hình Camera.
-/// Nó bao gồm 3 chức năng chính: Truy cập thư viện ảnh, Chụp ảnh mới, và Xem lịch sử.
+/// [CameraBottomBar] là bảng điều khiển tác vụ chính tại màn hình chụp ảnh.
+/// Widget này chịu trách nhiệm:
+/// 1. Cung cấp nút chụp ảnh trung tâm (Shutter button).
+/// 2. Kết nối với thư viện ảnh hệ thống (Gallery) để xử lý ảnh có sẵn.
+/// 3. Truy cập lịch sử quét (Tính năng đang phát triển).
 class CameraBottomBar extends StatefulWidget {
-  /// Callback thực thi hành động chụp ảnh (thường gọi đến CameraController ở màn hình cha).
+  /// Callback thực thi hành động chụp ảnh từ Camera trực tiếp.
+  /// Được truyền từ [CameraScreen] để tương tác với Controller chính.
   final VoidCallback onTakePhoto;
 
   const CameraBottomBar({super.key, required this.onTakePhoto});
@@ -17,51 +23,71 @@ class CameraBottomBar extends StatefulWidget {
 }
 
 class _CameraBottomBarState extends State<CameraBottomBar> {
-  /// Trạng thái theo dõi quá trình mở thư viện để hiển thị Loading Spinner.
+  /// Cờ trạng thái (Flag) để quản lý quá trình truy xuất tệp tin.
+  /// Giúp ngăn chặn việc người dùng nhấn liên tục gây lỗi "Multiple Intents".
   bool _isPickingImage = false;
 
-  /// Xử lý logic chọn ảnh từ thư viện của thiết bị.
+  /// Điều phối quy trình chọn ảnh từ thư viện và điều hướng xử lý.
+  /// Quy trình gồm 4 giai đoạn an toàn:
+  /// - **Giai đoạn 1**: Tạm dừng luồng Camera để tối ưu hóa tài nguyên hệ thống.
+  /// - **Giai đoạn 2**: Gọi Intent hệ thống mở trình chọn ảnh.
+  /// - **Giai đoạn 3**: Kiểm tra tính hợp lệ của tệp tin được chọn.
+  /// - **Giai đoạn 4**: Điều hướng sang màn hình đếm và khôi phục camera khi quay lại.
   Future<void> _pickImageFromGallery(BuildContext context) async {
-    // Chặn hành động nếu đang trong quá trình xử lý ảnh trước đó.
     if (_isPickingImage) return;
 
+    // Truy xuất CameraService mà không lắng nghe thay đổi (listen: false)
+    // để thực hiện các lệnh điều khiển luồng.
+    final cameraService = Provider.of<CameraService>(context, listen: false);
+
     try {
-      setState(() {
-        _isPickingImage = true;
-      });
+      setState(() => _isPickingImage = true);
+
+      // Tạm dừng Preview: Tránh việc CPU phải render video nền khi người dùng đang ở Gallery.
+      // Đồng thời giảm thiểu nguy cơ xung đột phần cứng trên một số dòng máy Android cũ.
+      await cameraService.pauseCamera();
 
       final ImagePicker picker = ImagePicker();
 
-      // [TỐI ƯU HÓA HIỆU SUẤT]:
-      // Giới hạn kích thước ảnh (1024x1024) và chất lượng (85%) ngay khi chọn.
-      // Điều này giúp tiết kiệm bộ nhớ RAM khi AI xử lý và giảm nguy cơ lỗi Crash (Out of Memory).
+      // Mở trình chọn ảnh với cấu hình tối ưu cho AI:
+      // Giới hạn kích thước giúp tăng tốc độ nạp ảnh vào RAM tại màn hình sau.
       final XFile? pickedFile = await picker.pickImage(
         source: ImageSource.gallery,
         maxWidth: 1024,
         maxHeight: 1024,
-        imageQuality: 85,
+        imageQuality: 85, // Cân bằng giữa dung lượng tệp và độ chi tiết vật thể.
       );
 
-      // Kiểm tra tính hợp lệ của Context (đề phòng người dùng đã thoát màn hình khi đang chọn).
-      if (!context.mounted || pickedFile == null) return;
+      // Xử lý khi người dùng hủy chọn ảnh (nhấn nút Back hệ thống).
+      if (pickedFile == null) {
+        await cameraService.resumeCamera();
+        if (mounted) setState(() => _isPickingImage = false);
+        return;
+      }
 
-      // Điều hướng người dùng sang màn hình kết quả kèm theo đường dẫn ảnh đã chọn.
+      if (!context.mounted) return;
+
+      // Chuyển sang màn hình xử lý kết quả.
+      // await ở đây giữ cho tiến trình chờ đợi cho đến khi CountingScreen được 'Pop'.
       await Navigator.push(
         context,
         MaterialPageRoute(
           builder: (context) => CountingScreen(imagePath: pickedFile.path),
         ),
       );
+
+      // Tái kích hoạt luồng camera khi quay lại màn hình chính.
+      await cameraService.resumeCamera();
+
     } catch (e) {
+      // Đảm bảo camera luôn được khôi phục dù có lỗi xảy ra trong quá trình chọn tệp.
+      await cameraService.resumeCamera();
       if (context.mounted) {
-        UIHelper.showErrorSnackBar(context, 'Lỗi mở thư viện: $e');
+        UIHelper.showErrorSnackBar(context, 'Lỗi truy cập thư viện: $e');
       }
     } finally {
-      // Đảm bảo trạng thái Loading được tắt dù thành công hay thất bại.
       if (mounted) {
-        setState(() {
-          _isPickingImage = false;
-        });
+        setState(() => _isPickingImage = false);
       }
     }
   }
@@ -69,20 +95,20 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black, // Màu nền đen đặc trưng của giao diện nhiếp ảnh.
+      color: Colors.black, // Tạo sự tương phản mạnh giúp nổi bật khu vực điều khiển.
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
           Padding(
-            // Padding dưới (32.0) thường được dùng để tránh đè lên thanh Home của iOS/Android.
+            // Căn chỉnh khoảng cách an toàn (Safe Area) cho các thiết bị có tai thỏ/cằm dày.
             padding: const EdgeInsets.fromLTRB(24.0, 16.0, 24.0, 32.0),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                _buildAlbumButton(context),   // Nút Thư viện (Trái)
-                _buildCaptureButton(),        // Nút Chụp (Giữa)
-                _buildHistoryButton(context), // Nút Lịch sử (Phải)
+                _buildAlbumButton(context),
+                _buildCaptureButton(),
+                _buildHistoryButton(context),
               ],
             ),
           ),
@@ -91,7 +117,7 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
     );
   }
 
-  /// Nút mở Album ảnh: Có tích hợp hiệu ứng Loading khi đang xử lý.
+  /// Nút chức năng mở Album: Thiết kế dạng ô vuông bo góc.
   Widget _buildAlbumButton(BuildContext context) {
     return GestureDetector(
       onTap: () => _pickImageFromGallery(context),
@@ -99,48 +125,47 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
         width: 60,
         height: 60,
         decoration: BoxDecoration(
-          color: Colors.white.withAlpha(50), // Hiệu ứng làm mờ nhẹ (Frosted glass).
-          borderRadius: BorderRadius.circular(8.0),
+          color: Colors.white.withAlpha(50),
+          borderRadius: BorderRadius.circular(12.0), // Bo góc hiện đại hơn.
         ),
         child: _isPickingImage
             ? const Center(
           child: SizedBox(
-            width: 30,
-            height: 30,
+            width: 25,
+            height: 25,
             child: CircularProgressIndicator(
               color: Colors.amber,
-              strokeWidth: 3.0,
+              strokeWidth: 2.5,
             ),
           ),
         )
             : const Icon(
-          Icons.photo_library,
+          Icons.photo_library_rounded,
           color: Colors.white,
-          size: 30,
+          size: 28,
         ),
       ),
     );
   }
 
-  /// Nút Chụp ảnh: Thiết kế theo tiêu chuẩn Camera truyền thống (Vòng tròn lồng nhau).
+  /// Nút Chụp ảnh chính (Shutter Button).
   Widget _buildCaptureButton() {
     return GestureDetector(
       onTap: widget.onTakePhoto,
       child: Container(
-        width: 70,
-        height: 70,
+        width: 76,
+        height: 76,
         decoration: BoxDecoration(
-          color: Colors.transparent,
           shape: BoxShape.circle,
           border: Border.all(
             color: Colors.white,
-            width: 4.0, // Viền ngoài dày tạo điểm nhấn.
+            width: 5.0,
           ),
         ),
         child: Center(
           child: Container(
-            width: 60,
-            height: 60,
+            width: 62,
+            height: 62,
             decoration: const BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,
@@ -151,12 +176,10 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
     );
   }
 
-  /// Nút Lịch sử: Hiện tại đang để chế độ chờ phát triển (Maintenance).
+  /// Nút Lịch sử: Truy cập danh sách các lần đếm trước đây.
   Widget _buildHistoryButton(BuildContext context) {
     return GestureDetector(
-      onTap: () {
-        UIHelper.showMaintenanceSnackBar(context);
-      },
+      onTap: () => UIHelper.showMaintenanceSnackBar(context),
       child: Container(
         width: 60,
         height: 60,
@@ -165,9 +188,9 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
           shape: BoxShape.circle,
         ),
         child: const Icon(
-          Icons.history,
+          Icons.history_rounded,
           color: Colors.white,
-          size: 30,
+          size: 28,
         ),
       ),
     );

@@ -7,9 +7,13 @@ import '../services/camera_service.dart';
 import '../widgets/camera_bottom_bar.dart';
 import '../helpers/ui_helpers.dart';
 
-/// [CameraScreen] là màn hình giao diện chính khi người dùng mở ứng dụng.
-/// Nó hiển thị luồng video trực tiếp từ ống kính và cung cấp các nút điều khiển chụp.
+/// [CameraScreen] là giao diện điều khiển camera chính của ứng dụng.
+/// Màn hình này chịu trách nhiệm:
+/// 1. Hiển thị luồng dữ liệu video thời gian thực (Camera Preview).
+/// 2. Cung cấp các công cụ tương tác: Bật/tắt Flash, chụp ảnh.
+/// 3. Hiển thị lớp phủ (Overlay) hướng dẫn người dùng căn chỉnh.
 class CameraScreen extends StatefulWidget {
+  /// Cấu hình camera được chọn (thường là camera sau).
   final CameraDescription camera;
 
   const CameraScreen({super.key, required this.camera});
@@ -19,24 +23,24 @@ class CameraScreen extends StatefulWidget {
 }
 
 class _CameraScreenState extends State<CameraScreen> {
-  /// Trạng thái điều khiển hiệu ứng "chớp đen" khi nhấn nút chụp.
-  /// Giúp người dùng nhận biết được ảnh đã được ghi lại thành công (Visual Feedback).
+  /// Trạng thái điều khiển hiệu ứng "Shutter Flash" (màn hình chớp đen).
+  /// Nhằm tạo phản hồi thị giác (Visual Feedback) giúp người dùng biết ảnh đã được chụp.
   bool _showFlashEffect = false;
 
   @override
   void initState() {
     super.initState();
-    // Khởi tạo phần cứng camera ngay khi màn hình vừa được nạp vào bộ nhớ.
-    // listen: false được dùng vì ta chỉ gọi hàm, không muốn build lại cả widget ở đây.
+    // Khởi tạo phần cứng thông qua Service.
+    // Sử dụng [listen: false] vì không cần render lại Widget trong vòng đời khởi tạo.
     Provider.of<CameraService>(context, listen: false).initialize();
   }
 
   /// Kích hoạt hiệu ứng nháy màn hình mô phỏng cửa trập camera.
+  /// Luồng hoạt động: [setState] bật đen -> Chờ 100ms -> [setState] tắt đen.
   void _triggerFlashEffect() {
-    if (!mounted) return;
+    if (!mounted) return; // Đảm bảo widget còn tồn tại trong cây widget
     setState(() => _showFlashEffect = true);
 
-    // Sử dụng Timer để tự động tắt lớp màu đen sau 100ms.
     Timer(const Duration(milliseconds: 100), () {
       if (mounted) {
         setState(() => _showFlashEffect = false);
@@ -46,10 +50,10 @@ class _CameraScreenState extends State<CameraScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Đăng ký lắng nghe sự thay đổi từ CameraService (như FlashMode, Initialization status).
+    // Lắng nghe các thay đổi trạng thái từ CameraService (FlashMode, Init status,...)
     final cameraService = Provider.of<CameraService>(context);
 
-    // 1. KIỂM TRA TRẠNG THÁI: Nếu camera chưa sẵn sàng, hiển thị màn hình chờ.
+    // Xử lý trường hợp Camera đang nạp dữ liệu hoặc quyền truy cập chưa được cấp.
     if (!cameraService.isInitialized) {
       return const Scaffold(
         backgroundColor: Colors.black,
@@ -58,13 +62,12 @@ class _CameraScreenState extends State<CameraScreen> {
     }
 
     return Scaffold(
-      // --- PHẦN 1: THANH CÔNG CỤ TRÊN (APP BAR) ---
+      /// --- TOP BAR: Điều khiển các thiết lập nhanh ---
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(70.0),
         child: AppBar(
           backgroundColor: Colors.black,
           centerTitle: true,
-          // Nút điều khiển đèn Flash: Thay đổi icon và màu sắc dựa trên mode hiện tại.
           leading: IconButton(
             icon: Icon(
               cameraService.currentFlashMode == FlashMode.off
@@ -80,13 +83,12 @@ class _CameraScreenState extends State<CameraScreen> {
             'BULLET COUNTER',
             style: TextStyle(
               color: Colors.white70,
-              fontFamily: 'UTM_Helvet', // Font chữ tùy chỉnh tạo nét chuyên nghiệp
+              fontFamily: 'UTM_Helvet',
               fontWeight: FontWeight.bold,
               fontSize: 24,
             ),
           ),
           actions: <Widget>[
-            // Nút cấu hình tỷ lệ khung hình (Hiện tại đang để chế độ chờ bảo trì).
             IconButton(
               icon: const Icon(Icons.aspect_ratio, color: Colors.white),
               onPressed: () => UIHelper.showMaintenanceSnackBar(context),
@@ -95,18 +97,17 @@ class _CameraScreenState extends State<CameraScreen> {
         ),
       ),
 
-      // --- PHẦN 2: KHU VỰC HIỂN THỊ CAMERA (BODY) ---
+      /// --- VIEWPORT: Khu vực hiển thị nội dung chính ---
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // LỚP 1: Luồng Video trực tiếp (Camera Preview).
-          // Sử dụng FittedBox để giải quyết vấn đề tỷ lệ khung hình giữa cảm biến ảnh và màn hình điện thoại.
+          // LỚP 1: Camera Preview.
+          // Sử dụng FittedBox để xử lý sự khác biệt về Aspect Ratio giữa Sensor và Screen.
           SizedBox.expand(
             child: FittedBox(
-              fit: BoxFit.cover, // Đảm bảo ảnh tràn toàn bộ khu vực hiển thị.
+              fit: BoxFit.cover,
               child: SizedBox(
-                // Lưu ý: PreviewSize thường trả về Width/Height theo chiều ngang của cảm biến.
-                // Do đó, khi ở chế độ dọc (Portrait), ta phải hoán đổi chúng.
+                // Hoán đổi Width/Height từ PreviewSize (Landscape) sang Portrait.
                 width: cameraService.controller.value.previewSize!.height,
                 height: cameraService.controller.value.previewSize!.width,
                 child: CameraPreview(cameraService.controller),
@@ -114,10 +115,10 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // LỚP 2: Khung ngắm (Viewfinder Overlay).
-          // Vẽ 4 góc màu vàng giúp người dùng căn chỉnh vật thể vào trung tâm ảnh.
+          // LỚP 2: Viewfinder Overlay (Khung ngắm).
+          // Dùng IgnorePointer để các tương tác chạm có thể truyền xuống lớp Preview phía dưới.
           Positioned.fill(
-            child: IgnorePointer( // Cho phép các sự kiện chạm xuyên qua lớp này.
+            child: IgnorePointer(
               child: Padding(
                 padding: const EdgeInsets.all(2),
                 child: CustomPaint(
@@ -127,8 +128,8 @@ class _CameraScreenState extends State<CameraScreen> {
             ),
           ),
 
-          // LỚP 3: Hiệu ứng Flash giả lập (Screen Flash).
-          // Khi chụp, lớp đen này sẽ mờ dần rồi biến mất trong 100ms.
+          // LỚP 3: Shutter Effect (Hiệu ứng chụp).
+          // Sử dụng AnimatedOpacity để tạo cảm giác chuyển cảnh mượt mà thay vì bật/tắt tức thì.
           Positioned.fill(
             child: AnimatedOpacity(
               opacity: _showFlashEffect ? 1.0 : 0.0,
@@ -142,18 +143,26 @@ class _CameraScreenState extends State<CameraScreen> {
         ],
       ),
 
-      // --- PHẦN 3: THANH ĐIỀU KHIỂN DƯỚI (BOTTOM BAR) ---
+      /// --- BOTTOM BAR: Hành động chính ---
       bottomNavigationBar: Container(
         color: Colors.black,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             CameraBottomBar(
-              onTakePhoto: () {
-                // Thực hiện đồng thời 2 hành động: Hiệu ứng nháy và Chụp ảnh.
-                _triggerFlashEffect();
-                Provider.of<CameraService>(context, listen: false)
-                    .takePictureAndNavigate(context);
+              onTakePhoto: () async {
+                _triggerFlashEffect(); // Tạo hiệu ứng thị giác ngay lập tức
+
+                final service = Provider.of<CameraService>(context, listen: false);
+
+                // Thực hiện quy trình: Chụp ảnh -> Xử lý -> Chuyển màn hình kết quả.
+                // Hàm này sẽ 'await' cho đến khi người dùng quay lại từ màn hình kết quả.
+                await service.takePictureAndNavigate(context);
+
+                // Sau khi quay lại (Pop), kích hoạt lại camera để tiếp tục sử dụng.
+                if (mounted) {
+                  await service.resumeCamera();
+                }
               },
             ),
           ],
@@ -163,7 +172,8 @@ class _CameraScreenState extends State<CameraScreen> {
   }
 }
 
-/// [CornersPainter] vẽ 4 đường kẻ góc đặc trưng của các thiết bị ngắm/quét.
+/// [CornersPainter] thực hiện vẽ 4 góc khung ngắm lên Canvas.
+/// Giúp người dùng định vị mục tiêu vào vùng trung tâm của cảm biến.
 class CornersPainter extends CustomPainter {
   final Color color;
 
@@ -171,26 +181,28 @@ class CornersPainter extends CustomPainter {
 
   @override
   void paint(Canvas canvas, Size size) {
-    final double lineLength = size.width / 5; // Độ dài của mỗi nét vẽ góc.
+    const double strokeWidth = 2.0;
+    final double lineLength = size.width / 5;
+
     final paint = Paint()
       ..color = color
-      ..strokeWidth = 2.0
+      ..strokeWidth = strokeWidth
       ..style = PaintingStyle.stroke;
 
     final path = Path()
-    // Vẽ góc trên bên trái
+    // Góc: Trên - Trái
       ..moveTo(0, lineLength)
       ..lineTo(0, 0)
       ..lineTo(lineLength, 0)
-    // Vẽ góc trên bên phải
+    // Góc: Trên - Phải
       ..moveTo(size.width - lineLength, 0)
       ..lineTo(size.width, 0)
       ..lineTo(size.width, lineLength)
-    // Vẽ góc dưới bên trái
+    // Góc: Dưới - Trái
       ..moveTo(0, size.height - lineLength)
       ..lineTo(0, size.height)
       ..lineTo(lineLength, size.height)
-    // Vẽ góc dưới bên phải
+    // Góc: Dưới - Phải
       ..moveTo(size.width - lineLength, size.height)
       ..lineTo(size.width, size.height)
       ..lineTo(size.width, size.height - lineLength);
@@ -198,6 +210,7 @@ class CornersPainter extends CustomPainter {
     canvas.drawPath(path, paint);
   }
 
+  /// Không cần vẽ lại trừ khi cấu hình màu sắc thay đổi.
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

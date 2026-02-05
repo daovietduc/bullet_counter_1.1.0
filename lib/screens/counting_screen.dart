@@ -6,20 +6,24 @@ import 'package:flutter/services.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 
-// Import các thành phần giao diện (Widgets)
+// --- CẤU TRÚC MODULES ---
 import '../widgets/counting_image_display.dart';
 import '../widgets/counting_bottom_bar.dart';
 import '../widgets/menu_display_options.dart';
-
-// Import các dịch vụ xử lý logic (Services)
+import '../widgets/scan_effect.dart';
 import '../services/counting_service.dart';
 import '../services/preferences_service.dart';
 import '../models/detection_result.dart';
 import '../helpers/ui_helpers.dart';
 
-/// [CountingScreen] là màn hình chính thực hiện chức năng nhận diện và đếm đối tượng.
-/// Màn hình này nhận vào một [imagePath] để hiển thị và xử lý AI.
+/// [CountingScreen] chịu trách nhiệm xử lý hậu kỳ cho hình ảnh đã chụp.
+/// Quy trình hoạt động chính:
+/// 1. Tải ảnh từ đường dẫn bộ nhớ tạm.
+/// 2. Khởi tạo mô hình AI (YOLO) trong một luồng riêng ([Isolate]).
+/// 3. Hiển thị lớp phủ đồ họa (Overlay) dựa trên tọa độ vật thể phát hiện được.
+/// 4. Cho phép người dùng tùy chỉnh hiển thị và lưu kết quả cuối cùng.
 class CountingScreen extends StatefulWidget {
+  /// Đường dẫn vật lý của file ảnh vừa chụp hoặc chọn từ thư viện.
   final String imagePath;
 
   const CountingScreen({super.key, required this.imagePath});
@@ -29,49 +33,59 @@ class CountingScreen extends StatefulWidget {
 }
 
 class _CountingScreenState extends State<CountingScreen> {
-  // --- BỘ ĐIỀU KHIỂN (CONTROLLERS) ---
+  // --- BỘ ĐIỀU KHIỂN & DỊCH VỤ (CONTROLLERS & SERVICES) ---
 
-  /// Chụp màn hình vùng widget để lưu kết quả
+  /// Chụp ảnh màn hình vùng làm việc để xuất file kết quả bao gồm cả các khung nhận diện.
   final ScreenshotController _screenshotController = ScreenshotController();
 
-  /// Dịch vụ xử lý nhận diện AI (YOLO)
+  /// Logic nghiệp vụ chính để giao tiếp với mô hình TensorFlow Lite.
   final CountingService _countingService = CountingService();
 
-  /// Dịch vụ lưu trữ cấu hình người dùng (SharedPreferences)
+  /// Quản lý việc lưu/tải các tùy chọn hiển thị (Show/Hide boxes, colors) vào bộ nhớ máy.
   final PreferencesService _prefsService = PreferencesService();
 
-  // --- TRẠNG THÁI: TÙY CHỌN HIỂN THỊ (DISPLAY OPTIONS) ---
-  bool _showBoundingBoxes = true; // Hiển thị khung bao
-  bool _showConfidence = true;    // Hiển thị độ tin cậy (%)
-  bool _showFillBox = false;      // Tô màu nền khung bao
-  bool _showOrderNumber = false;  // Hiển thị số thứ tự đếm
-  bool _isMultiColor = true;      // Sử dụng nhiều màu cho các đối tượng
-  double _fillOpacity = 0.4;      // Độ trong suốt của màu nền
-  Color _boxColor = Colors.amber; // Màu sắc mặc định của khung
+  // --- CẤU HÌNH HIỂN THỊ (DISPLAY CONFIGURATION) ---
+  bool _showBoundingBoxes = true;
+  bool _showConfidence = true;
+  bool _showFillBox = false;
+  bool _showOrderNumber = false;
+  bool _isMultiColor = true;
+  double _fillOpacity = 0.4;
+  Color _boxColor = Colors.amber;
 
-  // --- TRẠNG THÁI: DỮ LIỆU (DATA STATE) ---
-  List<DetectionResult> _detectionResults = []; // Danh sách kết quả từ AI
-  bool _isCounting = false;                     // Trạng thái đang xử lý
-  ui.Image? _originalImage;                     // Đối tượng ảnh gốc để vẽ Canvas
-  SelectedMode? _selectedMode;                  // Chế độ đếm hiện tại (vd: đếm đạn, đếm gạch...)
+  // --- QUẢN LÝ DỮ LIỆU & TRẠNG THÁI (DATA MANAGEMENT) ---
+
+  /// Danh sách các đối tượng đã được AI nhận diện thành công.
+  List<DetectionResult> _detectionResults = [];
+
+  /// Cờ kiểm soát trạng thái xử lý để tránh người dùng kích hoạt nhiều tiến trình AI cùng lúc.
+  bool _isCounting = false;
+
+  /// Đối tượng ảnh cấp thấp dùng để vẽ lên [CustomPainter] với độ chính xác cao.
+  ui.Image? _originalImage;
+
+  /// Chế độ nhận diện đang được chọn (Ví dụ: Đếm đạn, đếm gạch, đếm linh kiện...).
+  SelectedMode? _selectedMode;
 
   @override
   void initState() {
     super.initState();
-    _loadPreferences(); // Tải cấu hình đã lưu trước đó
-    _loadImage();       // Giải mã file ảnh thành object ui.Image
+    // Khởi tạo song song: Tải cài đặt người dùng và chuẩn bị dữ liệu hình ảnh.
+    _loadPreferences();
+    _loadImage();
   }
 
   @override
   void dispose() {
+    // Giải phóng bộ nhớ RAM từ các đối tượng nặng (Ảnh, Isolate, Controller).
     _originalImage?.dispose();
     _countingService.dispose();
     super.dispose();
   }
 
-  // --- LOGIC: KHỞI TẠO (INITIALIZATION) ---
+  // --- LOGIC KHỞI TẠO (INITIALIZATION LOGIC) ---
 
-  /// Tải các cài đặt người dùng từ bộ nhớ máy
+  /// Khôi phục các thiết lập hiển thị từ lần sử dụng trước đó.
   Future<void> _loadPreferences() async {
     final loadedMode = await _prefsService.loadSelectedMode();
     final displayPrefs = await _prefsService.loadDisplayPreferences();
@@ -89,59 +103,60 @@ class _CountingScreenState extends State<CountingScreen> {
     }
   }
 
-  /// Chuyển đổi file ảnh từ đường dẫn thành định dạng [ui.Image] để xử lý đồ họa
+  /// Giải mã file vật lý thành [ui.Image].
+  /// Bước này cần thiết để [CustomPainter] có thể render ảnh với tỷ lệ chuẩn xác.
   Future<void> _loadImage() async {
     try {
       final data = await File(widget.imagePath).readAsBytes();
       final image = await decodeImageFromList(data);
       if (mounted) setState(() => _originalImage = image);
     } catch (e) {
-      debugPrint("Lỗi tải ảnh: $e");
+      debugPrint("Lỗi giải mã hình ảnh: $e");
     }
   }
 
-  // --- LOGIC: XỬ LÝ AI (ISOLATE) ---
+  // --- XỬ LÝ ĐA LUỒNG (PARALLEL PROCESSING) ---
 
-  /// Hàm chạy độc lập (Isolate) để thực hiện AI inference mà không gây lag UI.
-  /// [params] chứa SendPort, byte model, nhãn và đường dẫn ảnh.
+  /// [Isolate] Function: Chạy tiến trình AI tách biệt hoàn toàn khỏi luồng chính (Main UI Isolate).
+  /// @param params: Map chứa các tài nguyên cần thiết để khởi chạy AI.
+  /// Giải thích: Việc chạy AI cực kỳ tốn CPU. Nếu chạy trực tiếp trên luồng chính,
+  /// ứng dụng sẽ bị "đóng băng" (Jank) khiến các hiệu ứng Scan không thể hoạt động.
   static Future<void> _runInferenceIsolate(Map<String, dynamic> params) async {
     final SendPort sendPort = params['sendPort'];
     final isolateService = CountingService();
     try {
-      // Tải model vào bộ nhớ của Isolate
       await isolateService.loadModelFromBytes(params['modelBytes'], params['labels']);
-      // Chạy nhận diện
       final results = await isolateService.countObjects(
           params['imagePath'],
           targetClass: params['targetClass']
       );
-      sendPort.send(results); // Gửi kết quả về main isolate
+      sendPort.send(results);
     } catch (e) {
-      sendPort.send(<DetectionResult>[]); // Gửi danh sách rỗng nếu lỗi
+      sendPort.send(<DetectionResult>[]);
     } finally {
       isolateService.dispose();
     }
   }
 
-  /// Kích hoạt quá trình đếm đối tượng sử dụng mô hình AI
+  /// Kích hoạt quy trình đếm đối tượng.
   Future<void> _startCounting() async {
     if (_isCounting || _selectedMode == null) return;
 
     setState(() {
       _isCounting = true;
-      _detectionResults = [];
+      _detectionResults = []; // Xóa kết quả cũ để chuẩn bị đếm mới
     });
 
-    UIHelper.showLoadingIndicator(context, message: 'processing...');
+    UIHelper.showLoadingIndicator(context, message: 'AI đang phân tích...');
 
     try {
-      // 1. Tải tài nguyên (labels và model)
+      // 1. Chuẩn bị tài nguyên AI từ thư mục assets.
       final labelsData = await rootBundle.loadString('assets/labels.txt');
-      final labelsList = labelsData.split('\n').map((l) => l.trim()).where((l) => l.isNotEmpty).toList();
+      final labelsList = labelsData.split('\n').map((l) => l.trim()).toList();
       final modelData = await rootBundle.load('assets/yolo11m_obb_bullet_couter_preview_float16.tflite');
       final modelBytes = modelData.buffer.asUint8List();
 
-      // 2. Thiết lập Isolate để tránh đứng hình (UI jank)
+      // 2. Khởi tạo Port để nhận dữ liệu từ luồng Isolate quay về luồng Main.
       final receivePort = ReceivePort();
       await Isolate.spawn(_runInferenceIsolate, {
         'sendPort': receivePort.sendPort,
@@ -151,13 +166,13 @@ class _CountingScreenState extends State<CountingScreen> {
         'labels': labelsList,
       });
 
-      // 3. Nhận kết quả và cập nhật giao diện
+      // 3. Chờ đợi kết quả và cập nhật trạng thái UI.
       final results = await receivePort.first as List<DetectionResult>;
       if (mounted) {
         setState(() => _detectionResults = results);
       }
     } catch (e) {
-      if (mounted) UIHelper.showErrorSnackBar(context, 'Lỗi xử lý AI: $e');
+      if (mounted) UIHelper.showErrorSnackBar(context, 'Lỗi AI: $e');
     } finally {
       if (mounted) {
         UIHelper.hideLoadingIndicator(context);
@@ -166,18 +181,18 @@ class _CountingScreenState extends State<CountingScreen> {
     }
   }
 
-  // --- LOGIC: HÀNH ĐỘNG (ACTIONS) ---
+  // --- CÁC HÀNH ĐỘNG NGƯỜI DÙNG (USER ACTIONS) ---
 
-  /// Chụp ảnh màn hình kết quả và lưu vào thư viện ảnh của thiết bị
+  /// Chụp lại màn hình vùng làm việc và ghi vào thư viện ảnh của máy.
   Future<void> _saveImageToGallery() async {
     if (!mounted || _isCounting) return;
 
-    UIHelper.showLoadingIndicator(context, message: 'Đang chuẩn bị ảnh...');
+    UIHelper.showLoadingIndicator(context, message: 'Đang kết xuất hình ảnh...');
     try {
-      // Chụp widget nằm trong Screenshot controller
+      // Capture với pixelRatio cao (2.0) giúp ảnh lưu lại sắc nét hơn ảnh hiển thị trên màn hình.
       final Uint8List? imageBytes = await _screenshotController.capture(
         delay: const Duration(milliseconds: 100),
-        pixelRatio: 2.0, // Tăng chất lượng ảnh lưu
+        pixelRatio: 2.0,
       );
 
       if (imageBytes != null) {
@@ -187,19 +202,19 @@ class _CountingScreenState extends State<CountingScreen> {
           name: "Result_${DateTime.now().millisecondsSinceEpoch}",
         );
         if (mounted && result['isSuccess'] == true) {
-          UIHelper.showSuccessSnackBar(context, 'Đã lưu ảnh vào thư viện!');
+          UIHelper.showSuccessSnackBar(context, 'Lưu thành công!');
         }
       }
     } catch (e) {
-      if (mounted) UIHelper.showErrorSnackBar(context, 'Lỗi lưu ảnh: $e');
+      if (mounted) UIHelper.showErrorSnackBar(context, 'Lỗi lưu trữ: $e');
     } finally {
       if (mounted) UIHelper.hideLoadingIndicator(context);
     }
   }
 
-  // --- THÀNH PHẦN GIAO DIỆN (UI COMPONENTS) ---
+  // --- XÂY DỰNG GIAO DIỆN (UI RENDERING) ---
 
-  /// Thanh AppBar tùy chỉnh hiển thị số lượng vật thể đếm được
+  /// Header chứa thông tin tổng kết: Số lượng đã đếm và Chế độ hiện tại.
   PreferredSize _buildAppBar() {
     return PreferredSize(
       preferredSize: const Size.fromHeight(70.0),
@@ -215,26 +230,17 @@ class _CountingScreenState extends State<CountingScreen> {
             RichText(
               text: TextSpan(
                 children: [
-                  const TextSpan(text: 'Target: ',
-                      style: TextStyle(fontFamily: 'Lexend',
-                          color: Colors.white,
-                          fontSize: 24,
-                          fontWeight: FontWeight.bold)),
-                  TextSpan(text: '${_detectionResults.length}',
-                      style: const TextStyle(fontFamily: 'Lexend',
-                          color: Colors.orangeAccent,
-                          fontSize: 28,
-                          fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'Target: ', style: TextStyle(fontFamily: 'Lexend', color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                  TextSpan(text: '${_detectionResults.length}', style: const TextStyle(fontFamily: 'Lexend', color: Colors.orangeAccent, fontSize: 28, fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
-            Text('- Mode: ${_selectedMode?.name ?? 'Chưa chọn'} -',
-                style: const TextStyle(color: Colors.deepOrange, fontSize: 14)),
+            Text('- Mode: ${_selectedMode?.name ?? '...'} -', style: const TextStyle(color: Colors.deepOrange, fontSize: 14)),
           ],
         ),
         actions: [
           Builder(builder: (context) => IconButton(
-            icon: const Icon(Icons.tune, color: Colors.white), // Nút mở cài đặt hiển thị
+            icon: const Icon(Icons.tune, color: Colors.white),
             onPressed: () => Scaffold.of(context).openEndDrawer(),
           )),
         ],
@@ -245,13 +251,14 @@ class _CountingScreenState extends State<CountingScreen> {
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: false, // Ngăn chặn thoát bằng nút back hệ thống để kiểm soát trạng thái
+      canPop: false, // Chặn thoát bằng cử chỉ vuốt để đảm bảo người dùng không vô tình mất kết quả.
       child: Screenshot(
         controller: _screenshotController,
         child: Scaffold(
           backgroundColor: Colors.black,
           appBar: _buildAppBar(),
-          // Drawer bên phải chứa các tùy chỉnh hiển thị
+
+          /// Drawer (Menu bên phải) dùng để tùy chỉnh trải nghiệm thị giác.
           endDrawer: DisplayOptions(
             showBoundingBoxes: _showBoundingBoxes,
             showConfidence: _showConfidence,
@@ -262,6 +269,7 @@ class _CountingScreenState extends State<CountingScreen> {
             boxColor: _boxColor,
             onOptionChanged: (key, newValue) {
               setState(() {
+                // Ánh xạ các thay đổi từ menu vào State của Screen.
                 if (key == 'box') _showBoundingBoxes = newValue;
                 if (key == 'fill') _showFillBox = newValue;
                 if (key == 'order') _showOrderNumber = newValue;
@@ -270,7 +278,8 @@ class _CountingScreenState extends State<CountingScreen> {
                 if (key == 'opacity') _fillOpacity = newValue;
                 if (key == 'color') _boxColor = newValue;
               });
-              // Lưu cấu hình ngay khi người dùng thay đổi
+
+              // Đồng bộ hóa tức thì vào bộ nhớ lưu trữ.
               _prefsService.saveDisplayPreferences(DisplayPreferences(
                 showBoundingBoxes: _showBoundingBoxes,
                 showConfidence: _showConfidence,
@@ -282,20 +291,49 @@ class _CountingScreenState extends State<CountingScreen> {
               ));
             },
           ),
-          // Thành phần chính hiển thị ảnh và các khung nhận diện
-          body: ImageDisplay(
-            originalImage: _originalImage,
-            imagePath: widget.imagePath,
-            detectionResults: _detectionResults,
-            showBoundingBoxes: _showBoundingBoxes,
-            showConfidence: _showConfidence,
-            showFillBox: _showFillBox,
-            showOrderNumber: _showOrderNumber,
-            isMultiColor: _isMultiColor,
-            fillOpacity: _fillOpacity,
-            boxColor: _boxColor,
+
+          body: Stack(
+            children: [
+              Center(
+                child: AspectRatio(
+                  // Đảm bảo khung hiển thị luôn khớp chính xác với tỷ lệ ảnh gốc.
+                  aspectRatio: _originalImage != null
+                      ? _originalImage!.width / _originalImage!.height
+                      : 1.0,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      /// Lớp hiển thị ảnh và vẽ tọa độ (Detection Overlays).
+                      ImageDisplay(
+                        originalImage: _originalImage,
+                        imagePath: widget.imagePath,
+                        detectionResults: _detectionResults,
+                        showBoundingBoxes: _showBoundingBoxes,
+                        showConfidence: _showConfidence,
+                        showFillBox: _showFillBox,
+                        showOrderNumber: _showOrderNumber,
+                        isMultiColor: _isMultiColor,
+                        fillOpacity: _fillOpacity,
+                        boxColor: _boxColor,
+                      ),
+
+                      /// Hiệu ứng thẩm mỹ: Tia quét laser chạy dọc khi đang xử lý AI.
+                      if (_isCounting)
+                        Positioned.fill(
+                          child: ScanEffect(
+                            scanColor: Colors.cyanAccent,
+                            duration: const Duration(seconds: 2),
+                            child: Container(color: Colors.transparent),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
-          // Thanh điều khiển phía dưới: Chọn mode, Nút Đếm, Nút Lưu
+
+          /// Footer điều hướng: Chứa logic chọn Model và lệnh thực thi Chụp/Lưu.
           bottomNavigationBar: CountingBottomBar(
             isCounting: _isCounting,
             currentModeName: _selectedMode?.name ?? 'Chọn Mode',
@@ -306,13 +344,13 @@ class _CountingScreenState extends State<CountingScreen> {
               final newMode = SelectedMode(
                 targetClass: id,
                 name: name,
-                image: img ?? '', // Xử lý null-safety
+                image: img ?? '',
               );
 
               _prefsService.saveSelectedMode(newMode);
               setState(() {
                 _selectedMode = newMode;
-                _detectionResults = []; // Reset kết quả cũ để người dùng đếm lại theo mode mới
+                _detectionResults = []; // Reset để đảm bảo dữ liệu đếm khớp với Model mới.
               });
             },
           ),
