@@ -26,6 +26,7 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
   /// Cờ trạng thái (Flag) để quản lý quá trình truy xuất tệp tin.
   /// Giúp ngăn chặn việc người dùng nhấn liên tục gây lỗi "Multiple Intents".
   bool _isPickingImage = false;
+  bool _isPressed = false;
 
   /// Điều phối quy trình chọn ảnh từ thư viện và điều hướng xử lý.
   /// Quy trình gồm 4 giai đoạn an toàn:
@@ -71,7 +72,11 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
       await Navigator.push(
         context,
         MaterialPageRoute(
-          builder: (context) => CountingScreen(imagePath: pickedFile.path),
+          builder: (context) => CountingScreen(
+              imagePath: pickedFile.path,
+              aspectRatio: 1,
+              isFromAlbum: true,
+          ),
         ),
       );
 
@@ -150,6 +155,9 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
   /// Nút Chụp ảnh chính (Shutter Button).
   Widget _buildCaptureButton() {
     return GestureDetector(
+      onTapDown: (_) => setState(() => _isPressed = true),
+      onTapUp: (_) => setState(() => _isPressed = false),
+      onTapCancel: () => setState(() => _isPressed = false),
       onTap: widget.onTakePhoto,
       child: Container(
         width: 76,
@@ -158,13 +166,16 @@ class _CameraBottomBarState extends State<CameraBottomBar> {
           shape: BoxShape.circle,
           border: Border.all(
             color: Colors.white,
-            width: 5.0,
+            width: 5.0, // Viền ngoài cố định
           ),
         ),
         child: Center(
-          child: Container(
-            width: 62,
-            height: 62,
+          // Chỉ phần lõi trắng này là co giãn
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOut,
+            width: _isPressed ? 54 : 62,
+            height: _isPressed ? 54 : 62,
             decoration: const BoxDecoration(
               color: Colors.white,
               shape: BoxShape.circle,

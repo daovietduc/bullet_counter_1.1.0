@@ -12,6 +12,7 @@ class ImageDisplay extends StatelessWidget {
   final ui.Image? originalImage;           // Đối tượng ảnh đã decode để lấy kích thước gốc
   final String imagePath;                  // Đường dẫn file để hiển thị bằng Image.file
   final List<DetectionResult> detectionResults; // Danh sách kết quả trả về từ model AI
+  final bool isFromAlbum;
 
   // --- CẤU HÌNH HIỂN THỊ (Từ Drawer truyền xuống) ---
   final bool showBoundingBoxes;
@@ -26,6 +27,7 @@ class ImageDisplay extends StatelessWidget {
     super.key,
     required this.originalImage,
     required this.imagePath,
+    required this.isFromAlbum,
     required this.detectionResults,
     required this.showBoundingBoxes,
     required this.showConfidence,
@@ -40,30 +42,40 @@ class ImageDisplay extends StatelessWidget {
   Widget build(BuildContext context) {
     // 1. Kiểm tra trạng thái tải ảnh
     if (originalImage == null) {
-      return const Center(child: CircularProgressIndicator(color: Colors.amber));
+      return const Center(
+          child: CircularProgressIndicator(color: Colors.amber));
     }
 
     // 2. Sử dụng LayoutBuilder để lấy kích thước vùng hiển thị khả dụng (Constraints)
     return LayoutBuilder(
       builder: (context, constraints) {
-        // --- TÍNH TOÁN TỶ LỆ HIỂN THỊ (ASPECT RATIO FITTING) ---
+        // 1. Kích thước ảnh gốc từ AI
         double imgW = originalImage!.width.toDouble();
         double imgH = originalImage!.height.toDouble();
-        double ratio = imgW / imgH; // Tỷ lệ khung hình của ảnh gốc
+        double imgRatio = imgW / imgH;
 
-        // Giả định chiều rộng hiển thị bằng chiều rộng tối đa của màn hình
-        double displayWidth = constraints.maxWidth;
-        double displayHeight = constraints.maxWidth / ratio;
+        // 2. TÍNH TOÁN KÍCH THƯỚC HIỂN THỊ ĐỘNG
+        double displayWidth;
+        double displayHeight;
 
-        // Nếu chiều cao tính toán vượt quá giới hạn màn hình, ta phải tính lại dựa trên chiều cao
-        if (displayHeight > constraints.maxHeight) {
-          displayHeight = constraints.maxHeight;
-          displayWidth = displayHeight * ratio;
+        if (isFromAlbum) {
+          // NẾU TỪ ALBUM: Khung hiển thị phải khớp chính xác với tỷ lệ ảnh gốc
+          displayWidth = constraints.maxWidth;
+          displayHeight = constraints.maxWidth / imgRatio;
+
+          // Trường hợp ảnh quá dài, giới hạn theo chiều cao tối đa của màn hình
+          if (displayHeight > constraints.maxHeight) {
+            displayHeight = constraints.maxHeight;
+            displayWidth = displayHeight * imgRatio;
+          }
+        } else {
+          // NẾU TỪ CAMERA: Giữ nguyên khung 3:4 để đồng bộ với lúc chụp
+          displayWidth = constraints.maxWidth;
+          displayHeight = constraints.maxWidth / (3 / 4);
         }
 
-        // 3. InteractiveViewer cho phép người dùng Zoom (phóng to) và Pan (di chuyển) ảnh
         return InteractiveViewer(
-          clipBehavior: Clip.none, // Cho phép vẽ lấn ra ngoài biên nếu cần (như text nhãn)
+          clipBehavior: Clip.none,
           minScale: 1.0,
           maxScale: 4.0,
           child: Center(
@@ -72,15 +84,21 @@ class ImageDisplay extends StatelessWidget {
               height: displayHeight,
               child: Stack(
                 children: [
-                  // LỚP 1: Ảnh gốc hiển thị dưới cùng
+                  // LỚP 1: Ảnh gốc
                   Positioned.fill(
-                    child: Image.file(File(imagePath), fit: BoxFit.fill),
+                    child: Image.file(
+                      File(imagePath),
+                      // BoxFit.fill là an toàn nhất khi khung SizedBox đã khớp tỷ lệ mục tiêu
+                      fit: isFromAlbum ? BoxFit.fill : BoxFit.cover,
+                      alignment: Alignment.center,
+                    ),
                   ),
 
-                  // LỚP 2: CustomPaint để vẽ các khung nhận diện lên trên ảnh
+                  // LỚP 2: Vẽ khung nhận diện
                   if (detectionResults.isNotEmpty)
                     Positioned.fill(
-                      child: _buildPainter(displayWidth, displayHeight, imgW, imgH),
+                      child: _buildPainter(
+                          displayWidth, displayHeight, imgW, imgH),
                     ),
                 ],
               ),

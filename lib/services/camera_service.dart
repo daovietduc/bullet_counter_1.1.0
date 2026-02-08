@@ -83,7 +83,7 @@ class CameraService extends ChangeNotifier {
   /// Thực hiện chụp ảnh và chuyển tiếp dữ liệu đến màn hình xử lý [CountingScreen].
   /// Luồng xử lý bất đồng bộ:
   /// - Chụp ảnh -> Lưu file tạm -> Dừng Camera (Tiết kiệm tài nguyên) -> Chuyển trang.
-  Future<void> takePictureAndNavigate(BuildContext context) async {
+  Future<void> takePictureAndNavigate(BuildContext context, double appliedRatio) async {
     // Ngăn chặn nhấn nút liên tục khi đang xử lý ảnh cũ.
     if (!_isInitialized || _cameraController.value.isTakingPicture) return;
 
@@ -103,7 +103,7 @@ class CameraService extends ChangeNotifier {
         await Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => CountingScreen(imagePath: image.path),
+            builder: (context) => CountingScreen(imagePath: image.path, aspectRatio: appliedRatio),
           ),
         );
 

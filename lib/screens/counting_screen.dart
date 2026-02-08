@@ -6,7 +6,6 @@ import 'package:flutter/services.dart';
 import 'package:screenshot/screenshot.dart';
 import 'package:image_gallery_saver_plus/image_gallery_saver_plus.dart';
 
-// --- CẤU TRÚC MODULES ---
 import '../widgets/counting_image_display.dart';
 import '../widgets/counting_bottom_bar.dart';
 import '../widgets/menu_display_options.dart';
@@ -25,8 +24,15 @@ import '../helpers/ui_helpers.dart';
 class CountingScreen extends StatefulWidget {
   /// Đường dẫn vật lý của file ảnh vừa chụp hoặc chọn từ thư viện.
   final String imagePath;
+  final double aspectRatio;
+  final bool isFromAlbum;
 
-  const CountingScreen({super.key, required this.imagePath});
+  const CountingScreen({
+    super.key,
+    required this.imagePath,
+    required this.aspectRatio,
+    this.isFromAlbum = false,
+  });
 
   @override
   State<CountingScreen> createState() => _CountingScreenState();
@@ -66,6 +72,8 @@ class _CountingScreenState extends State<CountingScreen> {
 
   /// Chế độ nhận diện đang được chọn (Ví dụ: Đếm đạn, đếm gạch, đếm linh kiện...).
   SelectedMode? _selectedMode;
+
+  double? _displayAspectRatio;
 
   @override
   void initState() {
@@ -109,7 +117,21 @@ class _CountingScreenState extends State<CountingScreen> {
     try {
       final data = await File(widget.imagePath).readAsBytes();
       final image = await decodeImageFromList(data);
-      if (mounted) setState(() => _originalImage = image);
+
+      if (mounted) {
+        setState(() {
+          _originalImage = image;
+
+          if (widget.isFromAlbum) {
+            // Nếu từ Album: Hiển thị trọn vẹn theo tỷ lệ thực của ảnh gốc
+            _displayAspectRatio = image.width / image.height;
+          } else {
+            // Nếu từ Camera: Ép theo tỷ lệ khung ngắm (3:4, 1:1...) để đồng bộ
+            _displayAspectRatio = widget.aspectRatio;
+            print("Album Image Ratio: $_displayAspectRatio");
+          }
+        });
+      }
     } catch (e) {
       debugPrint("Lỗi giải mã hình ảnh: $e");
     }
@@ -230,12 +252,21 @@ class _CountingScreenState extends State<CountingScreen> {
             RichText(
               text: TextSpan(
                 children: [
-                  const TextSpan(text: 'Target: ', style: TextStyle(fontFamily: 'Lexend', color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                  TextSpan(text: '${_detectionResults.length}', style: const TextStyle(fontFamily: 'Lexend', color: Colors.orangeAccent, fontSize: 28, fontWeight: FontWeight.bold)),
+                  const TextSpan(text: 'Target: ',
+                      style: TextStyle(fontFamily: 'Lexend',
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold)),
+                  TextSpan(text: '${_detectionResults.length}',
+                      style: const TextStyle(fontFamily: 'Lexend',
+                          color: Colors.orangeAccent,
+                          fontSize: 28,
+                          fontWeight: FontWeight.bold)),
                 ],
               ),
             ),
-            Text('- Mode: ${_selectedMode?.name ?? '...'} -', style: const TextStyle(color: Colors.deepOrange, fontSize: 14)),
+            Text('- Mode: ${_selectedMode?.name ?? '...'} -',
+                style: const TextStyle(color: Colors.deepOrange, fontSize: 14)),
           ],
         ),
         actions: [
@@ -292,39 +323,44 @@ class _CountingScreenState extends State<CountingScreen> {
             },
           ),
 
+          /// Phần hiển thị chính
           body: Stack(
             children: [
+              Container(color: Colors.black), // Nền đen cho toàn bộ màn hình
               Center(
                 child: AspectRatio(
-                  // Đảm bảo khung hiển thị luôn khớp chính xác với tỷ lệ ảnh gốc.
-                  aspectRatio: _originalImage != null
-                      ? _originalImage!.width / _originalImage!.height
-                      : 1.0,
+                  // NẾU LÀ ALBUM: Dùng tỷ lệ thực của ảnh (nếu đã load xong)
+                  // NẾU LÀ CAMERA: Dùng tỷ lệ truyền từ camera sang (3/4, 1:1...)
+                  aspectRatio: widget.isFromAlbum
+                      ? (_originalImage != null ? _originalImage!.width / _originalImage!.height : 1.0)
+                      : widget.aspectRatio,
                   child: Stack(
                     alignment: Alignment.center,
+                    fit: StackFit.expand, // Đảm bảo các lớp con lấp đầy khung
                     children: [
-                      /// Lớp hiển thị ảnh và vẽ tọa độ (Detection Overlays).
-                      ImageDisplay(
-                        originalImage: _originalImage,
-                        imagePath: widget.imagePath,
-                        detectionResults: _detectionResults,
-                        showBoundingBoxes: _showBoundingBoxes,
-                        showConfidence: _showConfidence,
-                        showFillBox: _showFillBox,
-                        showOrderNumber: _showOrderNumber,
-                        isMultiColor: _isMultiColor,
-                        fillOpacity: _fillOpacity,
-                        boxColor: _boxColor,
+                      /// Lớp hiển thị ảnh: Cắt ảnh theo kiểu BoxFit.cover
+                      ClipRect( // Ngăn phần ảnh thừa tràn ra ngoài khung
+                        child: ImageDisplay(
+                          originalImage: _originalImage,
+                          imagePath: widget.imagePath,
+                          isFromAlbum: widget.isFromAlbum,
+                          detectionResults: _detectionResults,
+                          showBoundingBoxes: _showBoundingBoxes,
+                          showConfidence: _showConfidence,
+                          showFillBox: _showFillBox,
+                          showOrderNumber: _showOrderNumber,
+                          isMultiColor: _isMultiColor,
+                          fillOpacity: _fillOpacity,
+                          boxColor: _boxColor,
+                        ),
                       ),
 
-                      /// Hiệu ứng thẩm mỹ: Tia quét laser chạy dọc khi đang xử lý AI.
+                      /// Hiệu ứng thẩm mỹ: Tia quét laser (chỉ quét trong khung)
                       if (_isCounting)
-                        Positioned.fill(
-                          child: ScanEffect(
-                            scanColor: Colors.cyanAccent,
-                            duration: const Duration(seconds: 2),
-                            child: Container(color: Colors.transparent),
-                          ),
+                        ScanEffect(
+                          scanColor: Colors.cyanAccent,
+                          duration: const Duration(seconds: 2),
+                          child: Container(color: Colors.transparent),
                         ),
                     ],
                   ),

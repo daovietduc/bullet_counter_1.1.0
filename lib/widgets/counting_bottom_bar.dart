@@ -4,23 +4,11 @@ import 'menu_mode_selector.dart';
 /// [CountingBottomBar] là thanh điều khiển phía dưới của màn hình đếm.
 /// Nó chứa các nút chức năng chính: Lưu ảnh, Bắt đầu đếm (AI), và Chọn chế độ.
 class CountingBottomBar extends StatelessWidget {
-  /// Trạng thái AI đang xử lý (vô hiệu hóa nút bấm khi đang chạy)
   final bool isCounting;
-
-  /// Tên của chế độ hiện tại (vd: "Đạn chì", "Linh kiện")
   final String currentModeName;
-
-  /// Đường dẫn hoặc URL ảnh đại diện cho chế độ hiện tại
   final String? currentModeImage;
-
-  /// Callback xử lý khi người dùng nhấn nút 'COUNT'
   final VoidCallback onCountPressed;
-
-  /// Callback xử lý khi người dùng nhấn nút 'Save' (Lưu vào thư viện)
   final VoidCallback onSavePressed;
-
-  /// Callback khi người dùng thay đổi chế độ trong menu
-  /// Trả về: (id lớp mục tiêu, tên chế độ, đường dẫn ảnh)
   final Function(int, String, String?) onModeSelected;
 
   const CountingBottomBar({
